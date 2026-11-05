@@ -42,6 +42,11 @@ table{border-collapse:collapse;width:100%;font-size:13px;margin:6px 0}th,td{bord
   <div id="info"></div>
   <div id="blocchi"></div>
   <div id="esito"></div>
+  <details id="imp" style="margin-top:24px"><summary>Importa lo storico (CSV)</summary>
+    <p>Scegli il file CSV scaricato dal foglio Database. Prima ti mostro il riepilogo, poi confermi.</p>
+    <input type="file" id="fcsv" accept=".csv,text/csv">
+    <div id="rimp"></div>
+  </details>
 </div>
 </main>
 <div id="barra" class="nasc">
@@ -52,18 +57,21 @@ table{border-collapse:collapse;width:100%;font-size:13px;margin:6px 0}th,td{bord
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script>
 // ==== DA COMPILARE: li trovi in Supabase > Project Settings > API ====
-const SUPABASE_URL = 'https://gqqqmnjyjtxyvqrypgkd.supabase.co';
+const SUPABASE_URL = 'https://gqqqmnjyjtxyvqrypgkd.supabase.co/rest/v1/';
 const SUPABASE_KEY = 'sb_publishable_pWW3RId2OnNfcupr_wMixg_KlTXFuQ9';
 
-// Data delle scritture nel file GnuCash. SOSTITUISCI con la tua calcolaDataCompetenza se è diversa:
-// per ora = ultimo giorno del mese (13 = 31/12, 14 = 30/06).
+// Data delle scritture nel file GnuCash: come la tua calcolaDataCompetenza
+// (13 = 20/12, 14 = 20/06, gli altri mesi = ultimo giorno del mese).
 function dataCompetenza(anno, mese) {
-  const m = mese === 13 ? 12 : (mese === 14 ? 6 : mese);
-  const d = new Date(anno, m, 0);
-  return String(d.getDate()).padStart(2, '0') + '/' + String(m).padStart(2, '0') + '/' + anno;
+  if (mese === 13) return '20/12/' + anno;
+  if (mese === 14) return '20/06/' + anno;
+  const ultimo = new Date(anno, mese, 0).getDate();
+  return ultimo + '/' + (mese < 10 ? '0' + mese : mese) + '/' + anno;
 }
 
-const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+const MSG_SB = 'Non riesco a collegarmi a Supabase: compila le due righe INCOLLA_QUI all\'inizio del codice (oppure manca la connessione).';
+let sb = null;
+try { sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY); } catch (e) { sb = null; }
 const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
 let PROF, P = {}, C = [], S = [], ULT = {}, toccato = {}, sc = {};
 const $ = id => document.getElementById(id);
@@ -87,6 +95,7 @@ function valuta(formula, scope) {
 
 async function entra() {
   $('lerr').textContent = '';
+  if (!sb) { $('lerr').textContent = MSG_SB; return; }
   const { error } = await sb.auth.signInWithPassword({ email: $('em').value.trim(), password: $('pw').value });
   if (error) { $('lerr').textContent = 'Accesso non riuscito: ' + error.message; return; }
   carica();
@@ -100,11 +109,15 @@ async function carica() {
   const [a, b, c] = await Promise.all([sb.from('ced_parametri').select('*').eq('profilo_id', PROF.id), q('ced_caselle'), q('ced_scritture')]);
   P = {}; a.data.forEach(r => { P[r.nome] = /^-?\d+(\.\d+)?$/.test(r.valore) ? Number(r.valore) : r.valore; });
   C = b.data; S = c.data;
-  const u = await sb.from('ced_cedolini').select('anno,mese,valori').eq('datore', P.datore || '')
-    .gte('mese', 1).lte('mese', 12).order('anno', { ascending: false }).order('mese', { ascending: false }).limit(1);
-  ULT = u.data && u.data.length ? u.data[0] : {};
+  await leggiUltimo();
   $('login').classList.add('nasc'); $('app').classList.remove('nasc'); $('barra').classList.remove('nasc');
   disegna(); nuovo();
+}
+
+async function leggiUltimo() {
+  const u = await sb.from('ced_cedolini').select('anno,mese,valori').ilike('datore', P.datore || '')
+    .gte('mese', 1).lte('mese', 12).order('anno', { ascending: false }).order('mese', { ascending: false }).limit(1);
+  ULT = u.data && u.data.length ? u.data[0] : {};
 }
 
 function disegna() {
@@ -250,6 +263,71 @@ async function archivia(forza) {
   ULT = { anno: sc.anno, mese: sc.mese, valori: sc.mese <= 12 ? valori : ULT.valori };
   mostra('ok', ['Cedolino ' + sc.anno + '/' + sc.mese + ' archiviato.', 'File scaricato: ' + nome + ' (' + x.gnu.length + ' righe).']);
 }
+
+// ==INIZIO_CSV==
+function leggiCsv(t) {
+  const righe = []; let r = [], c = '', q = false;
+  t = t.replace(/^\uFEFF/, '');
+  for (let i = 0; i < t.length; i++) {
+    const ch = t[i];
+    if (q) { if (ch === '"') { if (t[i + 1] === '"') { c += '"'; i++; } else q = false; } else c += ch; }
+    else if (ch === '"') q = true;
+    else if (ch === ',') { r.push(c); c = ''; }
+    else if (ch === '\n' || ch === '\r') {
+      if (ch === '\r' && t[i + 1] === '\n') i++;
+      r.push(c); c = ''; if (r.some(x => x !== '')) righe.push(r); r = [];
+    } else c += ch;
+  }
+  if (c !== '' || r.length) { r.push(c); if (r.some(x => x !== '')) righe.push(r); }
+  return righe;
+}
+function preparaImport(righe, caselle, datoreProfilo, profiloId) {
+  const norm = s => String(s == null ? '' : s).trim().toLowerCase();
+  const out = { righe: [], errori: [] };
+  const intest = (righe[0] || []).map(norm);
+  const iA = intest.indexOf('anno'), iM = intest.indexOf('mese'), iD = intest.indexOf('datore');
+  if (iA < 0 || iM < 0 || iD < 0) { out.errori.push('Nel file mancano le colonne Anno, Mese o Datore.'); return out; }
+  const cols = [];
+  caselle.forEach(c => {
+    if (!c.nel_database || c.sigla === 'anno' || c.sigla === 'mese') return;
+    const i = intest.indexOf(norm(c.etichetta)); if (i >= 0) cols.push([c.sigla, i]);
+  });
+  righe.slice(1).forEach((r, n) => {
+    const anno = Number(r[iA]), mese = Number(r[iM]);
+    if (!(anno > 0) || !(mese >= 1 && mese <= 14)) { out.errori.push('Riga ' + (n + 2) + ': anno o mese non validi.'); return; }
+    const dc = String(r[iD] || '').trim(), mio = norm(dc) === norm(datoreProfilo), valori = {};
+    cols.forEach(([sig, i]) => { const v = num(r[i]); valori[sig] = isNaN(v) ? 0 : v; });
+    out.righe.push({ profilo_id: mio ? profiloId : null, anno, mese, datore: mio ? datoreProfilo : dc, valori });
+  });
+  return out;
+}
+// ==FINE_CSV==
+
+let DAIMPORTARE = [];
+$('fcsv').addEventListener('change', async e => {
+  const f = e.target.files[0], box = $('rimp'); if (!f) return;
+  box.textContent = 'Leggo il file...'; DAIMPORTARE = [];
+  const pr = preparaImport(leggiCsv(await f.text()), C, String(P.datore || ''), PROF.id);
+  const ex = await sb.from('ced_cedolini').select('anno,mese,datore');
+  if (ex.error) { box.textContent = 'Errore: ' + ex.error.message; return; }
+  const chiavi = new Set(ex.data.map(x => x.anno + '|' + x.mese + '|' + x.datore));
+  let gia = 0;
+  pr.righe.forEach(r => { const k = r.anno + '|' + r.mese + '|' + r.datore; if (chiavi.has(k)) gia++; else { chiavi.add(k); DAIMPORTARE.push(r); } });
+  const t = ['Righe lette: ' + pr.righe.length, 'Nuove da importare: ' + DAIMPORTARE.length, 'Già presenti (saltate): ' + gia].concat(pr.errori);
+  box.innerHTML = ''; const d = document.createElement('div'); d.className = 'msg ' + (pr.errori.length ? 'ko' : 'ok'); d.textContent = t.join('\n'); box.appendChild(d);
+  if (DAIMPORTARE.length) {
+    const b = document.createElement('button'); b.className = 'p'; b.style.marginTop = '8px'; b.textContent = 'Importa ' + DAIMPORTARE.length + ' cedolini';
+    b.onclick = async () => {
+      b.disabled = true;
+      const { error } = await sb.from('ced_cedolini').insert(DAIMPORTARE);
+      if (error) { b.disabled = false; d.className = 'msg ko'; d.textContent = 'Errore: ' + error.message + '\nNon ho importato nulla.'; return; }
+      d.className = 'msg ok'; d.textContent = 'Importati ' + DAIMPORTARE.length + ' cedolini.'; b.remove();
+      DAIMPORTARE = []; await leggiUltimo(); nuovo();
+    };
+    box.appendChild(b);
+  }
+});
+if (!sb) $('lerr').textContent = MSG_SB;
 </script>
 </body>
 </html>
