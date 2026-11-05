@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cedolino</title>
+<style>
+:root{--bg:#f6f8fa;--ink:#1b2430;--mut:#6b7684;--riga:#dde3ea;--acc:#0f5f73;--ok:#c9ecd2;--ko:#f6c9c9;--giallo:#fff1a8;--sf:#fff}
+@media(prefers-color-scheme:dark){:root{--bg:#141a21;--ink:#e6ebf1;--mut:#97a3b1;--riga:#2c3541;--acc:#5cc0d6;--ok:#1f4a2c;--ko:#5a2424;--giallo:#5b4f10;--sf:#1b232c}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.4 system-ui,-apple-system,Segoe UI,sans-serif}
+main{max-width:720px;margin:0 auto;padding:16px 12px 120px}
+h1{font-size:20px;margin:6px 0 12px}
+h2{font-size:14px;margin:18px 0 6px;padding:5px 8px;border-left:4px solid var(--acc);background:var(--sf)}
+.riga{display:flex;gap:8px;align-items:center;margin:4px 0}
+.riga label{flex:0 0 42%;font-weight:600}
+.riga input,.riga select,.box input{flex:1;min-width:0;padding:8px;font:inherit;text-align:right;border:1px solid var(--riga);border-radius:6px;background:var(--sf);color:var(--ink);font-variant-numeric:tabular-nums}
+.riga select{text-align:left}
+input.giallo{background:var(--giallo)}input[readonly]{background:transparent;border-style:dashed}
+button{padding:10px 14px;font:inherit;border-radius:6px;border:1px solid var(--acc);background:var(--sf);color:var(--acc);cursor:pointer}
+button.p{background:var(--acc);color:var(--sf)}button:disabled{opacity:.5}
+.box{max-width:340px;margin:60px auto;display:grid;gap:10px}.box input{text-align:left}
+#barra{position:fixed;left:0;right:0;bottom:0;padding:10px 12px;background:var(--sf);border-top:1px solid var(--riga)}
+#sq{max-width:720px;margin:0 auto 8px;padding:8px;border-radius:6px;text-align:center;font-weight:700;background:var(--riga)}
+#sq.ok{background:var(--ok)}#sq.ko{background:var(--ko)}
+#bt{max-width:720px;margin:0 auto;display:flex;gap:8px}#bt button{flex:1}
+#esito{margin-top:14px}.msg{padding:10px;border-radius:6px;white-space:pre-wrap}.msg.ok{background:var(--ok)}.msg.ko{background:var(--ko)}
+table{border-collapse:collapse;width:100%;font-size:13px;margin:6px 0}th,td{border:1px solid var(--riga);padding:4px 6px;text-align:left}td.n{text-align:right;font-variant-numeric:tabular-nums}
+.nasc{display:none}
+</style>
+</head>
+<body>
+<main>
+<h1>Cedolino</h1>
+<div id="login" class="box">
+  <input id="em" type="email" placeholder="Email" autocomplete="username">
+  <input id="pw" type="password" placeholder="Password" autocomplete="current-password">
+  <button class="p" onclick="entra()">Entra</button>
+  <div id="lerr"></div>
+</div>
+<div id="app" class="nasc">
+  <div id="info"></div>
+  <div id="blocchi"></div>
+  <div id="esito"></div>
+</div>
+</main>
+<div id="barra" class="nasc">
+  <div id="sq">Compila il netto</div>
+  <div id="bt"><button onclick="prova()">Prova</button><button class="p" id="bArc" onclick="archivia(false)">Archivia</button><button onclick="nuovo()">Nuovo</button></div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script>
+// ==== DA COMPILARE: li trovi in Supabase > Project Settings > API ====
+const SUPABASE_URL = 'https://gqqqmnjyjtxyvqrypgkd.supabase.co/rest/v1/';
+const SUPABASE_KEY = 'sb_publishable_pWW3RId2OnNfcupr_wMixg_KlTXFuQ9';
+
+// Data delle scritture nel file GnuCash. SOSTITUISCI con la tua calcolaDataCompetenza se è diversa:
+// per ora = ultimo giorno del mese (13 = 31/12, 14 = 30/06).
+function dataCompetenza(anno, mese) {
+  const m = mese === 13 ? 12 : (mese === 14 ? 6 : mese);
+  const d = new Date(anno, m, 0);
+  return String(d.getDate()).padStart(2, '0') + '/' + String(m).padStart(2, '0') + '/' + anno;
+}
+
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
+let PROF, P = {}, C = [], S = [], ULT = {}, toccato = {}, sc = {};
+const $ = id => document.getElementById(id);
+const arr = (x, n) => { n = n === undefined ? 2 : n; const f = Math.pow(10, n); return Math.round(x * f) / f; };
+const se = (c, a, b) => c ? a : b;
+const r2 = x => Math.round(x * 100) / 100;
+const fmt = n => n.toFixed(2).replace('.', ',');
+
+function num(s) {
+  s = String(s).trim().replace(/\s/g, '').replace('€', '');
+  if (s === '') return 0;
+  if (s.indexOf(',') >= 0) s = s.replace(/\./g, '').replace(',', '.');
+  const n = parseFloat(s);
+  return isNaN(n) ? NaN : n;
+}
+function valuta(formula, scope) {
+  const nomi = Object.keys(scope);
+  return new Function(...nomi, 'arr', 'se', 'abs', 'min', 'max', 'return (' + formula + ');')
+    (...nomi.map(n => scope[n]), arr, se, Math.abs, Math.min, Math.max);
+}
+
+async function entra() {
+  $('lerr').textContent = '';
+  const { error } = await sb.auth.signInWithPassword({ email: $('em').value.trim(), password: $('pw').value });
+  if (error) { $('lerr').textContent = 'Accesso non riuscito: ' + error.message; return; }
+  carica();
+}
+
+async function carica() {
+  const { data: pr, error } = await sb.from('ced_profili').select('*').order('creato').limit(1);
+  if (error || !pr.length) { $('lerr').textContent = 'Non trovo il profilo dei cedolini.'; return; }
+  PROF = pr[0];
+  const q = t => sb.from(t).select('*').eq('profilo_id', PROF.id).order('ordine');
+  const [a, b, c] = await Promise.all([sb.from('ced_parametri').select('*').eq('profilo_id', PROF.id), q('ced_caselle'), q('ced_scritture')]);
+  P = {}; a.data.forEach(r => { P[r.nome] = /^-?\d+(\.\d+)?$/.test(r.valore) ? Number(r.valore) : r.valore; });
+  C = b.data; S = c.data;
+  const u = await sb.from('ced_cedolini').select('anno,mese,valori').eq('datore', P.datore || '')
+    .gte('mese', 1).lte('mese', 12).order('anno', { ascending: false }).order('mese', { ascending: false }).limit(1);
+  ULT = u.data && u.data.length ? u.data[0] : {};
+  $('login').classList.add('nasc'); $('app').classList.remove('nasc'); $('barra').classList.remove('nasc');
+  disegna(); nuovo();
+}
+
+function disegna() {
+  $('info').textContent = 'Datore: ' + (P.datore || '');
+  const cont = $('blocchi'); cont.innerHTML = ''; let cur = null, box;
+  C.forEach(c => {
+    if (!c.etichetta) return;
+    if (c.blocco !== cur) { cur = c.blocco; const h = document.createElement('h2'); h.textContent = cur; cont.appendChild(h); box = document.createElement('div'); cont.appendChild(box); }
+    const d = document.createElement('div'); d.className = 'riga';
+    const l = document.createElement('label'); l.textContent = c.etichetta; if (c.nota) l.title = c.nota; d.appendChild(l);
+    let f;
+    if (c.sigla === 'mese') {
+      f = document.createElement('select');
+      MESI.forEach((m, i) => f.add(new Option((i + 1) + ' - ' + m, i + 1)));
+      f.add(new Option('13 - Tredicesima', 13)); f.add(new Option('14 - Quattordicesima', 14));
+    } else { f = document.createElement('input'); f.type = 'text'; f.inputMode = 'decimal'; f.autocomplete = 'off'; if (c.come === 'calcola') f.readOnly = true; }
+    f.id = 'f_' + c.sigla;
+    if (!f.readOnly) {
+      f.addEventListener('input', () => { toccato[c.sigla] = true; f.classList.remove('giallo'); ricalcola(); });
+      f.addEventListener('change', () => { toccato[c.sigla] = true; f.classList.remove('giallo'); ricalcola(); });
+      if (f.tagName === 'INPUT') f.addEventListener('focus', () => f.select());
+    }
+    d.appendChild(f); box.appendChild(d);
+  });
+}
+
+function nuovo() {
+  toccato = {}; $('esito').innerHTML = '';
+  C.forEach(c => {
+    const f = $('f_' + c.sigla); if (!f) return;
+    f.classList.remove('giallo');
+    if (c.sigla === 'anno') f.value = new Date().getFullYear();
+    else if (c.sigla === 'mese') f.value = new Date().getMonth() + 1;
+    else {
+      f.value = '';
+      const v = ULT.valori && ULT.valori[c.sigla];
+      if (c.proponi && c.come === 'scrivi' && typeof v === 'number') { f.value = fmt(v); f.classList.add('giallo'); }
+    }
+  });
+  ricalcola();
+}
+
+function ricalcola() {
+  sc = {};
+  Object.keys(P).forEach(k => { if (typeof P[k] === 'number') sc[k] = P[k]; });
+  C.forEach(c => { sc[c.sigla] = 0; });
+  C.forEach(c => {
+    const f = $('f_' + c.sigla); if (!f || c.come !== 'scrivi') return;
+    sc[c.sigla] = c.sigla === 'mese' ? Number(f.value) : num(f.value);
+  });
+  for (let giro = 0; giro < 4; giro++) {
+    C.forEach(c => {
+      if (c.come === 'scrivi') return;
+      const f = $('f_' + c.sigla);
+      if (c.come === 'proponi' && toccato[c.sigla] && f) { sc[c.sigla] = num(f.value); return; }
+      try {
+        const v = valuta(c.formula, sc);
+        sc[c.sigla] = (typeof v === 'number' && isFinite(v)) ? v : 0;
+        if (f && giro === 3) f.value = fmt(sc[c.sigla]);
+      } catch (e) { sc[c.sigla] = 0; }
+    });
+  }
+  const s = squadratura(), el = $('sq');
+  if (!sc.netto) { el.textContent = 'Compila il netto'; el.className = ''; }
+  else if (Math.abs(s) < 0.005) { el.textContent = 'Squadratura 0,00: pronto'; el.className = 'ok'; }
+  else { el.textContent = 'Squadratura ' + fmt(s); el.className = 'ko'; }
+}
+
+function squadratura() {
+  let att = 0;
+  C.forEach(c => { if (c.squadratura === 'piu') att += sc[c.sigla]; else if (c.squadratura === 'meno') att -= sc[c.sigla]; });
+  return r2(sc.netto - att);
+}
+
+function mesiOk(t, m) {
+  t = String(t || '').trim().toLowerCase();
+  if (t === '') return true;
+  return t.split(/[;,\s]+/).some(x => x === 'tutti' || (x === 'ordinari' && m >= 1 && m <= 12) || Number(x) === m);
+}
+
+function scritture() {
+  const out = { gnu: [], errori: [], somma: 0, data: dataCompetenza(sc.anno, sc.mese) };
+  const datore = String(P.datore || ''); let somma = 0;
+  S.forEach((s, i) => {
+    if (!s.attiva || !mesiOk(s.mesi, sc.mese)) return;
+    let imp;
+    try { imp = valuta(s.importo, sc); } catch (e) { out.errori.push('Scrittura ' + (i + 1) + ': la formula "' + s.importo + '" non va (' + e.message + ').'); return; }
+    if (typeof imp !== 'number' || !isFinite(imp)) { out.errori.push('Scrittura ' + (i + 1) + ': la formula non dà un numero.'); return; }
+    const cent = r2(imp); if (cent === 0) return;
+    out.gnu.push([out.data, datore, s.conto_gnucash, s.promemoria_gnucash, cent.toFixed(2)]); somma += cent;
+  });
+  out.somma = r2(somma); return out;
+}
+
+function csvCella(c) { const s = String(c == null ? '' : c); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }
+function scaricaCsv(righe, nome) {
+  const testo = '\uFEFF' + [['Data', 'Descrizione', 'Conto', 'Promemoria', 'Importo']].concat(righe).map(r => r.map(csvCella).join(',')).join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([testo], { type: 'text/csv' })); a.download = nome;
+  document.body.appendChild(a); a.click(); a.remove();
+}
+
+function mostra(cls, righe) { const d = document.createElement('div'); d.className = 'msg ' + cls; d.textContent = righe.join('\n'); $('esito').innerHTML = ''; $('esito').appendChild(d); }
+
+function prova() {
+  ricalcola(); const x = scritture();
+  if (x.errori.length) { mostra('ko', x.errori); return; }
+  let h = '<p>Data scritture: <b>' + x.data + '</b> &middot; Netto ' + fmt(sc.netto) + ' &middot; Squadratura ' + fmt(squadratura()) + '</p>';
+  h += '<table><tr><th>Conto</th><th>Promemoria</th><th>Importo</th></tr>';
+  const esc = t => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  x.gnu.forEach(r => { h += '<tr><td>' + esc(r[2]) + '</td><td>' + esc(r[3]) + '</td><td class="n">' + r[4].replace('.', ',') + '</td></tr>'; });
+  h += '<tr><td colspan="2"><b>Somma righe</b></td><td class="n"><b>' + fmt(x.somma) + '</b></td></tr></table>';
+  h += x.somma === 0 ? '<div class="msg ok">Le righe GnuCash quadrano.</div>' : '<div class="msg ko">Le righe GnuCash non quadrano: squilibrio ' + fmt(x.somma) + '.</div>';
+  h += '<p>Nulla è stato salvato.</p>';
+  $('esito').innerHTML = h;
+}
+
+async function archivia(forza) {
+  ricalcola();
+  if (!(sc.anno > 0) || !(sc.mese >= 1 && sc.mese <= 14)) { mostra('ko', ['Anno o mese non validi.']); return; }
+  if (!sc.netto) { mostra('ko', ['Il netto è vuoto o zero.']); return; }
+  const diff = squadratura();
+  if (Math.abs(diff) > 0.01) { mostra('ko', ['La squadratura (' + fmt(diff) + ') non è a zero. Controlla i dati.']); return; }
+  const x = scritture();
+  if (x.errori.length) { mostra('ko', x.errori); return; }
+  if (!x.gnu.length) { mostra('ko', ['Non c\'è nessuna scrittura da salvare.']); return; }
+  if (Math.abs(x.somma) >= 0.01 && !forza) {
+    if (!confirm('Le righe GnuCash non quadrano (somma ' + fmt(x.somma) + '). Archivio lo stesso?')) return;
+  }
+  $('bArc').disabled = true;
+  const valori = {}; C.forEach(c => { if (c.nel_database && c.sigla !== 'anno' && c.sigla !== 'mese') valori[c.sigla] = sc[c.sigla]; });
+  const { error } = await sb.from('ced_cedolini').insert({ profilo_id: PROF.id, anno: sc.anno, mese: sc.mese, datore: String(P.datore || ''), valori });
+  $('bArc').disabled = false;
+  if (error) {
+    mostra('ko', error.code === '23505'
+      ? ['Esiste già un cedolino per ' + sc.anno + '/' + sc.mese + ' di questo datore.', 'Non ho salvato nulla.']
+      : ['Errore nel salvataggio: ' + error.message]);
+    return;
+  }
+  const mm = sc.mese < 10 ? '0' + sc.mese : String(sc.mese);
+  const nome = sc.anno + '_' + mm + '_Cedolino_Gnucash.csv';
+  scaricaCsv(x.gnu, nome);
+  ULT = { anno: sc.anno, mese: sc.mese, valori: sc.mese <= 12 ? valori : ULT.valori };
+  mostra('ok', ['Cedolino ' + sc.anno + '/' + sc.mese + ' archiviato.', 'File scaricato: ' + nome + ' (' + x.gnu.length + ' righe).']);
+}
+</script>
+</body>
+</html>
