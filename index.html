@@ -517,9 +517,34 @@ function calcola730(anno, rs, giorni, altre, oneri, r) {
   const aCom = (r.addCom.aliq && !(r.addCom.esenz && reddito <= r.addCom.esenz)) ? R0(reddito * r.addCom.aliq / 100) : 0;
   return { imponibile, oneri: od, reddito, lorda, dl, ul, altre: al, netta, ritenute, saldo: netta - ritenute, prev, aReg, aCom, trReg: R0(S('add_reg')), trCom: R0(S('add_com')) };
 }
+function leggiBlocco(t) {
+  const a = t.indexOf('{'), b = t.lastIndexOf('}');
+  if (a < 0 || b < a) throw new Error('non trovo il blocco (deve iniziare con { e finire con })');
+  return JSON.parse(t.slice(a, b + 1));
+}
+// tiene solo le voci che la pagina conosce; le altre finiscono in "extra"
+function filtra(o, base, perc, errori, extra) {
+  const out = {};
+  Object.keys(o).forEach(k => {
+    const p = perc ? perc + '.' + k : k, b = base[k], v = o[k];
+    if (!(k in base)) { extra[p] = v; return; }
+    if (Array.isArray(b)) {
+      const coppie = Array.isArray(v) && v.every(x => Array.isArray(x) && x.length === 2 && (x[0] === null || typeof x[0] === 'number') && typeof x[1] === 'number');
+      if (!coppie) errori.push(p + ': devono essere coppie [fino a, aliquota]');
+      else if (p === 'irpef' && v.length !== 3) errori.push('irpef: servono 3 scaglioni');
+      else if (p === 'addReg.sc' && v.length > 5) errori.push('addReg.sc: al massimo 5 righe');
+      else out[k] = v;
+    } else if (b && typeof b === 'object') {
+      if (!v || typeof v !== 'object' || Array.isArray(v)) errori.push(p + ': formato non valido'); else out[k] = filtra(v, b, p, errori, extra);
+    } else if (typeof v !== typeof b || (typeof v === 'number' && !isFinite(v))) errori.push(p + ': tipo non valido');
+    else out[k] = v;
+  });
+  return out;
+}
 // ==FINE_730==
 const eu0 = n => String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
 let P730 = { giorni: 365, altre: 0, oneri: 0 };
+let PRE = null;
 async function render730(anno) {
   const box = await apriPannello('t_730'); if (!box) return;
   const anni = anniOk(); anno = anno || P730.anno || anni[0]; P730.anno = anno;
@@ -539,6 +564,7 @@ async function render730(anno) {
   righe[righe.length - 1].tot = true;
   box.append(h('h2', {}, 'Irpef'), tab(['Passaggio', 'Euro'], righe, 1),
     h('div', { className: 'msg ' + (x.saldo > 0 ? 'ko' : 'ok') }, 'Stima Irpef: ' + (x.saldo > 0 ? 'da versare ' : 'da ricevere ') + eu0(Math.abs(x.saldo)) + ' euro.'));
+  if (ordinari === 12 && Math.abs(x.saldo) > 10) box.append(h('div', { className: 'msg ko' }, 'Attenzione: la stima differisce di ' + eu0(Math.abs(x.saldo)) + ' euro dalle ritenute dei cedolini. Con un solo datore e un anno completo di solito significa che manca una regola o una detrazione: guarda in Impostazioni, oppure scrivimi.'));
   const pr = x.prev, entro = pr.tot <= pr.limite;
   box.append(h('h2', {}, 'Previdenza complementare'),
     tab(['Voce', 'Euro'], [['Contributo lavoratore (Fonte)', eu0(pr.lav)], ['Contributo azienda (Fonte c/az)', eu0(pr.az)], ['Totale fondi pensione', eu0(pr.tot)], ['Limite di deducibilità', eu(pr.limite)]], 1),
@@ -560,7 +586,9 @@ async function renderSet(anno, messaggio) {
   applicaParametri(q.data); ricalcola();
   anno = anno || new Date().getFullYear();
   const anni = []; for (let a = 2024; a <= new Date().getFullYear() + 1; a++) anni.push(a);
-  const g = regole(anno), r = g.r, F = {};
+  const pre = PRE; PRE = null;
+  const g = regole(anno), r = pre ? fondi(g.r, pre.regole) : g.r, F = {};
+  const EXTRA = Object.assign({}, g.r.extra || {}, pre ? pre.extra : {});
   const mostra = (txt, cls) => { const d = h('div', { className: 'msg ' + cls }, txt); box.prepend(d); };
   const nf = (et, v, k) => { const i = h('input', { value: v == null ? '' : String(v).replace('.', ','), inputMode: 'decimal' }); F[k] = i; return h('div', { className: 'riga' }, h('label', {}, et), i); };
   const nt = (et, v, k) => { const e = nf(et, v, k); F[k].style = 'text-align:left'; return e; };
@@ -570,6 +598,24 @@ async function renderSet(anno, messaggio) {
   const s = h('select', { onchange: () => renderSet(Number(s.value)) }, anni.map(a => new Option(a, a, false, a === anno)));
   box.append(h('h2', {}, 'Regole fiscali per anno'), h('div', { className: 'riga' }, h('label', {}, 'Anno'), s));
   if (!g.trovato) box.append(h('div', { className: 'msg ko' }, 'Per il ' + anno + ' non hai ancora inserito le regole: sto usando quelle del ' + g.usa + '. Controlla i numeri qui sotto e premi Salva.'));
+  if (pre) {
+    box.append(h('div', { className: 'msg ok' }, 'Regole incollate: controlla i campi e premi Salva. Non sono ancora salvate.' + (pre.note ? '\nNote: ' + pre.note : '')));
+    if (Object.keys(pre.extra).length) box.append(h('div', { className: 'msg ko' }, 'La pagina non conosce queste voci: ' + Object.keys(pre.extra).join(', ') + '. Le conservo quando salvi, ma non entrano nel calcolo. Scrivimi cosa sono e le aggiungo.'));
+  }
+  const ta = h('textarea', { rows: 3, placeholder: 'Incolla qui il blocco di regole che ti ho mandato' });
+  ta.style = 'width:100%;font:inherit;padding:8px;border:1px solid var(--riga);border-radius:6px;background:var(--sf);color:var(--ink)';
+  box.append(h('details', { open: !!pre }, h('summary', {}, 'Incolla regole'), ta, h('p', {},
+    h('button', { onclick: () => {
+      let o; try { o = leggiBlocco(ta.value); } catch (e) { mostra('Non riesco a leggere il blocco: ' + e.message, 'ko'); return; }
+      const { anno: a2, note, ...resto } = o, er = [], ex = {}, pulito = filtra(resto, REGOLE_BASE, '', er, ex);
+      if (er.length) { mostra('Blocco non valido:\n' + er.join('\n'), 'ko'); return; }
+      PRE = { regole: pulito, extra: ex, note: note || '' };
+      renderSet(Number(a2) || anno);
+    } }, 'Compila i campi'), ' ',
+    h('button', { onclick: async () => {
+      try { await navigator.clipboard.writeText(JSON.stringify(Object.assign({ anno }, r))); mostra('Regole del ' + anno + ' copiate: puoi incollarle in chat.', 'ok'); }
+      catch (e) { mostra('Non riesco a copiare: ' + e.message, 'ko'); }
+    } }, 'Copia le regole di questo anno'))));
   box.append(nt('Regione di residenza', r.luogo.regione, 'reg'), nt('Comune di residenza', r.luogo.comune, 'com'), h('h2', {}, 'Scaglioni Irpef'),
     nf('1° scaglione: fino a (euro)', r.irpef[0][0], 'i1'), nf('1° aliquota %', r.irpef[0][1], 'p1'), nf('2° scaglione: fino a (euro)', r.irpef[1][0], 'i2'), nf('2° aliquota %', r.irpef[1][1], 'p2'),
     nf('Oltre: aliquota %', r.irpef[2][1], 'p3'), h('h2', {}, 'Detrazione lavoro dipendente'),
@@ -591,6 +637,7 @@ async function renderSet(anno, messaggio) {
       addReg: { prog: F.prog.checked, sc: [1, 2, 3, 4, 5].map(i => [nn('r' + i + 'f'), nn('r' + i + 'p')]).filter(z => z[1] !== null) },
       addCom: { aliq: n('c1'), esenz: n('c2') }
     };
+    if (Object.keys(EXTRA).length) nuove.extra = EXTRA;
     const { error } = await sb.from('ced_parametri').upsert({ profilo_id: PROF.id, nome: 'regole_' + anno, valore: JSON.stringify(nuove), spiegazione: 'Regole fiscali ' + anno }, { onConflict: 'profilo_id,nome' });
     if (error) { mostra('Errore: ' + error.message, 'ko'); return; }
     renderSet(anno, 'Regole ' + anno + ' salvate.');
