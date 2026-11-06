@@ -27,6 +27,8 @@ button.p{background:var(--acc);color:var(--sf)}button:disabled{opacity:.5}
 #esito{margin-top:14px}.msg{padding:10px;border-radius:6px;white-space:pre-wrap}.msg.ok{background:var(--ok)}.msg.ko{background:var(--ko)}
 table{border-collapse:collapse;width:100%;font-size:13px;margin:6px 0}th,td{border:1px solid var(--riga);padding:4px 6px;text-align:left}td.n{text-align:right;font-variant-numeric:tabular-nums}
 .nasc{display:none}
+#nav{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 4px}#nav button.on{background:var(--acc);color:var(--sf)}
+.sc{overflow-x:auto}tr.tot td{font-weight:700}th.n{text-align:right}
 </style>
 </head>
 <body>
@@ -39,6 +41,8 @@ table{border-collapse:collapse;width:100%;font-size:13px;margin:6px 0}th,td{bord
   <div id="lerr"></div>
 </div>
 <div id="app" class="nasc">
+  <div id="nav"><button data-t="ins" class="on" onclick="vai('ins')">Inserisci</button><button data-t="mese" onclick="vai('mese')">Mese</button><button data-t="anni" onclick="vai('anni')">Anni</button><button data-t="cu" onclick="vai('cu')">CU</button><button data-t="730" onclick="vai('730')">730</button></div>
+  <div id="t_ins">
   <div id="info"></div>
   <div id="blocchi"></div>
   <div id="esito"></div>
@@ -47,6 +51,8 @@ table{border-collapse:collapse;width:100%;font-size:13px;margin:6px 0}th,td{bord
     <input type="file" id="fcsv" accept=".csv,text/csv">
     <div id="rimp"></div>
   </details>
+  </div>
+  <div id="t_mese" class="nasc"></div><div id="t_anni" class="nasc"></div><div id="t_cu" class="nasc"></div><div id="t_730" class="nasc"></div>
 </div>
 </main>
 <div id="barra" class="nasc">
@@ -327,6 +333,175 @@ $('fcsv').addEventListener('change', async e => {
     box.appendChild(b);
   }
 });
+
+// ===================== STORICO: mese, anni, CU, 730 =====================
+let ST = [];
+const NM = m => m <= 12 ? MESI[m - 1] : (m === 13 ? 'Tredicesima' : 'Quattordicesima');
+const eur = n => { const q = r2(n).toFixed(2).split('.'); return q[0].replace(/\B(?=(\d{3})+(?!\d))/g, '.') + ',' + q[1]; };
+const val = (r, k) => Number(r.valori && r.valori[k]) || 0;
+const sommaVoce = (rs, k) => r2(rs.reduce((a, r) => a + val(r, k), 0));
+const VOCI = () => C.filter(c => c.nel_database && c.sigla !== 'anno' && c.sigla !== 'mese' && !/^(ferie|prm\.)/i.test(c.etichetta));
+const anniOk = () => [...new Set(ST.map(r => r.anno))].sort((a, b) => b - a);
+function h(tag, p, ...kids) { const e = document.createElement(tag); Object.assign(e, p || {}); kids.flat().forEach(k => e.append(k)); return e; }
+function tab(intest, righe, daN) {
+  const t = h('table', {}, h('tr', {}, intest.map((x, i) => h('th', { className: i >= daN ? 'n' : '' }, x))));
+  righe.forEach(r => t.append(h('tr', { className: r.tot ? 'tot' : '' }, r.map((x, i) => h('td', { className: i >= daN ? 'n' : '' }, String(x))))));
+  return h('div', { className: 'sc' }, t);
+}
+async function leggiStorico() {
+  const q = await sb.from('ced_cedolini').select('*').order('anno').order('mese');
+  ST = q.error ? [] : q.data; return q.error;
+}
+function selAnno(anni, anno, fn) { const s = h('select', { onchange: () => fn(Number(s.value)) }, anni.map(a => new Option(a, a, false, a === anno))); return h('div', { className: 'riga' }, h('label', {}, 'Anno'), s); }
+async function apriPannello(id) {
+  const box = $(id); box.textContent = 'Carico...';
+  const err = await leggiStorico();
+  if (err) { box.textContent = 'Errore: ' + err.message; return null; }
+  if (!ST.length) { box.textContent = 'Nessun cedolino archiviato.'; return null; }
+  box.innerHTML = ''; return box;
+}
+function vai(t) {
+  ['ins', 'mese', 'anni', 'cu', '730'].forEach(x => {
+    $('t_' + x).classList.toggle('nasc', x !== t);
+    const b = document.querySelector('#nav [data-t="' + x + '"]'); if (b) b.classList.toggle('on', x === t);
+  });
+  $('barra').classList.toggle('nasc', t !== 'ins');
+  if (t === 'mese') renderMese(); if (t === 'anni') renderAnni(); if (t === 'cu') renderCu(); if (t === '730') render730();
+}
+
+// ---- Mese: elenco, modifica, elimina, scarica ----
+async function renderMese(anno) {
+  const box = await apriPannello('t_mese'); if (!box) return;
+  const anni = anniOk(); anno = anno || anni[0];
+  const t = h('table', {}, h('tr', {}, ['Mese', 'Datore', 'Retribuz.', 'Irpef netto', 'Netto', ''].map(x => h('th', {}, x))));
+  ST.filter(r => r.anno === anno).sort((a, b) => (a.mese <= 12 ? a.mese : a.mese === 13 ? 12.5 : 6.5) - (b.mese <= 12 ? b.mese : b.mese === 13 ? 12.5 : 6.5)).forEach(r =>
+    t.append(h('tr', {}, h('td', {}, NM(r.mese)), h('td', {}, r.datore), h('td', { className: 'n' }, eur(val(r, 'retr'))),
+      h('td', { className: 'n' }, eur(val(r, 'irpef_netto'))), h('td', { className: 'n' }, eur(val(r, 'netto'))),
+      h('td', {}, h('button', { onclick: () => apriMese(r.id) }, 'Apri')))));
+  box.append(selAnno(anni, anno, renderMese), h('div', { className: 'sc' }, t),
+    h('p', {}, h('button', { onclick: scaricaStorico }, 'Scarica tutto lo storico (CSV)')), h('div', { id: 'edit' }));
+}
+function apriMese(id) {
+  const r = ST.find(x => x.id === id), ed = $('edit'), campi = {}; ed.innerHTML = '';
+  const riga = (et, valore, k) => { const i = h('input', { value: valore, inputMode: 'decimal' }); campi[k] = i; return h('div', { className: 'riga' }, h('label', {}, et), i); };
+  ed.append(h('h2', {}, 'Modifica: ' + NM(r.mese) + ' ' + r.anno + ' - ' + r.datore),
+    riga('Anno', r.anno, '#anno'), riga('Mese (1-14)', r.mese, '#mese'), riga('Datore', r.datore, '#datore'));
+  campi['#datore'].style = 'text-align:left';
+  VOCI().forEach(c => ed.append(riga(c.etichetta, eur(val(r, c.sigla)), c.sigla)));
+  const msg = h('div', { className: 'msg' }); msg.style.display = 'none';
+  const errore = t => { msg.className = 'msg ko'; msg.style.display = ''; msg.textContent = t; };
+  ed.append(h('div', { className: 'riga' },
+    h('button', { className: 'p', onclick: async () => {
+      const valori = Object.assign({}, r.valori);
+      VOCI().forEach(c => { const n = num(campi[c.sigla].value); valori[c.sigla] = isNaN(n) ? 0 : n; });
+      const anno = Number(campi['#anno'].value), mese = Number(campi['#mese'].value);
+      if (!(anno > 0) || !(mese >= 1 && mese <= 14)) { errore('Anno o mese non validi.'); return; }
+      const { error } = await sb.from('ced_cedolini').update({ anno, mese, datore: campi['#datore'].value.trim(), valori }).eq('id', r.id);
+      if (error) { errore(error.code === '23505' ? 'Esiste già un cedolino con quell\'anno, mese e datore.' : 'Errore: ' + error.message); return; }
+      renderMese(anno);
+    } }, 'Salva modifiche'),
+    h('button', { onclick: async () => {
+      if (!confirm('Elimino definitivamente il cedolino ' + NM(r.mese) + ' ' + r.anno + ' (' + r.datore + ')?')) return;
+      const { error } = await sb.from('ced_cedolini').delete().eq('id', r.id);
+      if (error) { errore('Errore: ' + error.message); return; }
+      renderMese(r.anno);
+    } }, 'Elimina'),
+    h('button', { onclick: () => { ed.innerHTML = ''; } }, 'Chiudi')), msg);
+  ed.scrollIntoView();
+}
+function scaricaStorico() {
+  const cs = C.filter(c => c.nel_database && c.sigla !== 'anno' && c.sigla !== 'mese');
+  const testa = ['Anno', 'Mese'].concat(cs.map(c => c.etichetta), ['Datore']);
+  const righe = ST.map(r => [r.anno, r.mese].concat(cs.map(c => '"' + eur(val(r, c.sigla)) + '"'), [csvCella(r.datore)]));
+  const testo = '\uFEFF' + [testa].concat(righe).map(r => r.join(',')).join('\r\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([testo], { type: 'text/csv' }));
+  a.download = 'Reddito_Database_' + new Date().toISOString().slice(0, 10) + '.csv';
+  document.body.appendChild(a); a.click(); a.remove();
+}
+
+// ---- Anni: totali per anno, per datore o tutti ----
+async function renderAnni(d) {
+  const box = await apriPannello('t_anni'); if (!box) return;
+  d = d || '';
+  const datori = [...new Set(ST.map(r => r.datore))];
+  const rs = ST.filter(r => !d || r.datore === d), anni = [...new Set(rs.map(r => r.anno))].sort();
+  const s = h('select', { onchange: () => renderAnni(s.value) }, [new Option('Tutti i datori', '', false, !d)].concat(datori.map(x => new Option(x, x, false, x === d))));
+  const righe = [['Cedolini'].concat(anni.map(a => rs.filter(r => r.anno === a).length))]
+    .concat(VOCI().map(c => [c.etichetta].concat(anni.map(a => eur(sommaVoce(rs.filter(r => r.anno === a), c.sigla))))));
+  box.append(h('div', { className: 'riga' }, h('label', {}, 'Datore'), s), tab(['Voce'].concat(anni), righe, 1),
+    h('p', {}, 'Somma dei cedolini archiviati, 13ª e 14ª comprese. Le ferie sono escluse.'));
+}
+
+// ---- CU: riepilogo per datore ----
+const CU_VOCI = [['Retribuzione lorda', 'retr'], ['Contributi previdenziali (Ctr Inps)', 'ctr_inps'], ['Fondo pensione: contributo lavoratore', 'fonte'],
+  ['Fondo pensione: contributo azienda', 'fonte_az'], ['Fondo sanitario ed Ebit (F.Est + Ebit)', ['f_est', 'ebit']], ['Imponibile fiscale (Imp. Irpef)', 'imp_irpef'],
+  ['Irpef lorda', 'irpef_lordo'], ['Detrazioni lavoro dipendente', 'detr'], ['Ritenute Irpef (Irpef netto)', 'irpef_netto'],
+  ['Addizionale regionale trattenuta', 'add_reg'], ['Addizionale comunale trattenuta', 'add_com'], ['Acconto addizionale comunale', 'acc_com'], ['TFR lordo maturato', 'tfr_lordo']];
+async function renderCu(anno) {
+  const box = await apriPannello('t_cu'); if (!box) return;
+  const anni = anniOk(); anno = anno || anni[0];
+  box.append(selAnno(anni, anno, renderCu));
+  [...new Set(ST.filter(r => r.anno === anno).map(r => r.datore))].forEach(d => {
+    const rs = ST.filter(r => r.anno === anno && r.datore === d);
+    box.append(h('h2', {}, d + ' (' + rs.length + ' cedolini)'),
+      tab(['Voce', 'Importo'], CU_VOCI.map(([et, k]) => [et, eur([].concat(k).reduce((a, x) => a + sommaVoce(rs, x), 0))]), 1));
+  });
+  box.append(h('p', {}, 'Riepilogo di controllo calcolato dai tuoi cedolini: non è la CU ufficiale e non ne riporta i punti.'));
+}
+
+// ---- 730: simulazione ----
+// ==INIZIO_730==
+function irpefLorda(anno, R) {
+  const sc = anno >= 2026 ? [[28000, 0.23], [50000, 0.33], [Infinity, 0.43]] : [[28000, 0.23], [50000, 0.35], [Infinity, 0.43]];
+  let prec = 0, imp = 0;
+  sc.forEach(([lim, al]) => { if (R > prec) imp += (Math.min(R, lim) - prec) * al; prec = lim; });
+  return r2(imp);
+}
+function detrLavoro(R, giorni) {
+  let d = 0;
+  if (R <= 0) d = 0; else if (R <= 15000) d = 1955; else if (R <= 28000) d = 1910 + 1190 * (28000 - R) / 13000;
+  else if (R <= 50000) d = 1910 * (50000 - R) / 22000;
+  if (d > 0 && R > 25000 && R <= 35000) d += 65;
+  return r2(d * Math.min(giorni, 365) / 365);
+}
+function ulterioreDetr(anno, R, giorni) {
+  if (anno < 2025 || R <= 20000 || R > 40000) return 0;
+  const d = R <= 32000 ? 1000 : 1000 * (40000 - R) / 8000;
+  return r2(d * Math.min(giorni, 365) / 365);
+}
+function calcola730(anno, rs, giorni, altre, oneri) {
+  const imponibile = r2(rs.reduce((a, r) => a + (Number(r.valori && r.valori.imp_irpef) || 0), 0));
+  const ritenute = r2(rs.reduce((a, r) => a + (Number(r.valori && r.valori.irpef_netto) || 0), 0));
+  const reddito = r2(Math.max(0, imponibile - oneri)), lorda = irpefLorda(anno, reddito), dl = detrLavoro(reddito, giorni), ul = ulterioreDetr(anno, reddito, giorni);
+  const netta = r2(Math.max(0, lorda - dl - ul - altre));
+  return { imponibile, oneri, reddito, lorda, dl, ul, altre, netta, ritenute, saldo: r2(netta - ritenute) };
+}
+// ==FINE_730==
+let P730 = { giorni: 365, altre: 0, oneri: 0 };
+async function render730(anno) {
+  const box = await apriPannello('t_730'); if (!box) return;
+  const anni = anniOk(); anno = anno || P730.anno || anni[0]; P730.anno = anno;
+  const campo = (et, k) => {
+    const i = h('input', { value: String(P730[k]).replace('.', ','), inputMode: 'decimal' });
+    i.onchange = () => { const n = num(i.value); P730[k] = isNaN(n) ? 0 : n; render730(); };
+    return h('div', { className: 'riga' }, h('label', {}, et), i);
+  };
+  const rs = ST.filter(r => r.anno === anno), ordinari = rs.filter(r => r.mese <= 12).length;
+  const x = calcola730(anno, rs, P730.giorni, P730.altre, P730.oneri);
+  const righe = [['Imponibile dai cedolini (tutti i datori)', eur(x.imponibile)], ['Oneri deducibili aggiuntivi', '- ' + eur(x.oneri)], ['Reddito complessivo', eur(x.reddito)],
+    ['Imposta lorda', eur(x.lorda)], ['Detrazione lavoro dipendente', '- ' + eur(x.dl)], ['Ulteriore detrazione (dal 2025)', '- ' + eur(x.ul)], ['Altre detrazioni', '- ' + eur(x.altre)],
+    ['Imposta netta', eur(x.netta)], ['Ritenute già trattenute', '- ' + eur(x.ritenute)], [x.saldo > 0 ? 'Saldo: a DEBITO' : 'Saldo: a CREDITO', eur(Math.abs(x.saldo))]];
+  righe[righe.length - 1].tot = true;
+  const msg = h('div', { className: 'msg ' + (x.saldo > 0 ? 'ko' : 'ok') }, 'Stima: ' + (x.saldo > 0 ? 'da versare ' : 'da ricevere ') + eur(Math.abs(x.saldo)) + ' euro.');
+  box.append(selAnno(anni, anno, render730), campo('Giorni di lavoro nell\'anno (max 365)', 'giorni'), campo('Altre detrazioni in euro', 'altre'), campo('Oneri deducibili non già in busta paga', 'oneri'),
+    tab(['Passaggio', 'Importo'], righe, 1), msg,
+    h('p', {}, 'Mensilità ordinarie presenti: ' + ordinari + ' su 12' + (ordinari < 12 ? ' (anno incompleto: la stima non è attendibile)' : '') + '.'),
+    h('p', {}, 'Per confronto, detrazioni applicate nei cedolini: ' + eur(sommaVoce(rs, 'detr')) + '; calcolate qui: ' + eur(x.dl + x.ul) + '.'),
+    h('p', {}, 'Addizionali già trattenute: regionale ' + eur(sommaVoce(rs, 'add_reg')) + ', comunale ' + eur(sommaVoce(rs, 'add_com')) + ' (non ricalcolate).'),
+    h('p', {}, 'Aliquote ' + (anno >= 2026 ? '2026: 23% fino a 28.000, 33% fino a 50.000, 43% oltre.' : anno + ': 23% fino a 28.000, 35% fino a 50.000, 43% oltre.') +
+      ' Non incluse: familiari a carico, oneri detraibili, TFR, somma non imponibile fino a 20.000 euro; inserisci a mano ciò che manca nei campi sopra. È una stima di controllo, non sostituisce il 730 né un professionista.'));
+}
 if (!sb) $('lerr').textContent = MSG_SB;
 </script>
 </body>
