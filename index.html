@@ -41,7 +41,7 @@ table{border-collapse:collapse;width:100%;font-size:13px;margin:6px 0}th,td{bord
   <div id="lerr"></div>
 </div>
 <div id="app" class="nasc">
-  <div id="nav"><button data-t="ins" class="on" onclick="vai('ins')">Inserisci</button><button data-t="mese" onclick="vai('mese')">Mese</button><button data-t="anni" onclick="vai('anni')">Anni</button><button data-t="cu" onclick="vai('cu')">CU</button><button data-t="730" onclick="vai('730')">730</button></div>
+  <div id="nav"><button data-t="ins" class="on" onclick="vai('ins')">Inserisci</button><button data-t="mese" onclick="vai('mese')">Mese</button><button data-t="anni" onclick="vai('anni')">Anni</button><button data-t="cu" onclick="vai('cu')">CU</button><button data-t="730" onclick="vai('730')">730</button><button data-t="set" onclick="vai('set')">Impostazioni</button></div>
   <div id="t_ins">
   <div id="info"></div>
   <div id="blocchi"></div>
@@ -52,7 +52,7 @@ table{border-collapse:collapse;width:100%;font-size:13px;margin:6px 0}th,td{bord
     <div id="rimp"></div>
   </details>
   </div>
-  <div id="t_mese" class="nasc"></div><div id="t_anni" class="nasc"></div><div id="t_cu" class="nasc"></div><div id="t_730" class="nasc"></div>
+  <div id="t_mese" class="nasc"></div><div id="t_anni" class="nasc"></div><div id="t_cu" class="nasc"></div><div id="t_730" class="nasc"></div><div id="t_set" class="nasc"></div>
 </div>
 </main>
 <div id="barra" class="nasc">
@@ -113,11 +113,19 @@ async function carica() {
   PROF = pr[0];
   const q = t => sb.from(t).select('*').eq('profilo_id', PROF.id).order('ordine');
   const [a, b, c] = await Promise.all([sb.from('ced_parametri').select('*').eq('profilo_id', PROF.id), q('ced_caselle'), q('ced_scritture')]);
-  P = {}; a.data.forEach(r => { P[r.nome] = /^-?\d+(\.\d+)?$/.test(r.valore) ? Number(r.valore) : r.valore; });
+  applicaParametri(a.data);
   C = b.data; S = c.data;
   await leggiUltimo();
   $('login').classList.add('nasc'); $('app').classList.remove('nasc'); $('barra').classList.remove('nasc');
   disegna(); nuovo();
+}
+
+function applicaParametri(righe) {
+  P = {}; REG_DB = {};
+  righe.forEach(r => {
+    if (/^regole_\d{4}$/.test(r.nome)) { try { REG_DB[Number(r.nome.slice(7))] = JSON.parse(r.valore); } catch (e) { } }
+    else P[r.nome] = /^-?\d+(\.\d+)?$/.test(r.valore) ? Number(r.valore) : r.valore;
+  });
 }
 
 async function leggiUltimo() {
@@ -361,12 +369,12 @@ async function apriPannello(id) {
   box.innerHTML = ''; return box;
 }
 function vai(t) {
-  ['ins', 'mese', 'anni', 'cu', '730'].forEach(x => {
+  ['ins', 'mese', 'anni', 'cu', '730', 'set'].forEach(x => {
     $('t_' + x).classList.toggle('nasc', x !== t);
     const b = document.querySelector('#nav [data-t="' + x + '"]'); if (b) b.classList.toggle('on', x === t);
   });
   $('barra').classList.toggle('nasc', t !== 'ins');
-  if (t === 'mese') renderMese(); if (t === 'anni') renderAnni(); if (t === 'cu') renderCu(); if (t === '730') render730();
+  if (t === 'mese') renderMese(); if (t === 'anni') renderAnni(); if (t === 'cu') renderCu(); if (t === '730') render730(); if (t === 'set') renderSet();
 }
 
 // ---- Mese: elenco, modifica, elimina, scarica ----
@@ -452,32 +460,65 @@ async function renderCu(anno) {
 
 // ---- 730: simulazione ----
 // ==INIZIO_730==
-function irpefLorda(anno, R) {
-  const sc = anno >= 2026 ? [[28000, 0.23], [50000, 0.33], [Infinity, 0.43]] : [[28000, 0.23], [50000, 0.35], [Infinity, 0.43]];
+const REGOLE_BASE = {
+  luogo: { regione: '', comune: '' },
+  irpef: [[28000, 23], [50000, 35], [null, 43]],
+  detr: { d1: 1955, s1: 15000, d2: 1910, s2: 28000, d2x: 1190, s3: 50000, p65: 65, p65da: 25000, p65a: 35000 },
+  ulter: { importo: 1000, da: 20000, piena: 32000, fine: 40000 },
+  prev: 5164.57,
+  addReg: { prog: true, sc: [] },
+  addCom: { aliq: 0, esenz: 0 }
+};
+const REGOLE_ANNO = { 2024: { ulter: { importo: 0 } }, 2025: {}, 2026: { irpef: [[28000, 23], [50000, 33], [null, 43]] } };
+let REG_DB = {};
+const fondi = (a, b) => {
+  if (!b) return a;
+  const o = Array.isArray(a) ? a.slice() : Object.assign({}, a);
+  Object.keys(b).forEach(k => { o[k] = (b[k] && typeof b[k] === 'object' && !Array.isArray(b[k]) && a && typeof a[k] === 'object') ? fondi(a[k], b[k]) : b[k]; });
+  return o;
+};
+function regole(anno) {
+  const noti = Object.keys(REGOLE_ANNO).concat(Object.keys(REG_DB)).map(Number);
+  let a = anno; const trovato = noti.includes(anno);
+  if (!trovato) { const prec = noti.filter(x => x < anno).sort((x, y) => y - x)[0]; if (prec !== undefined) a = prec; }
+  return { r: fondi(fondi(REGOLE_BASE, REGOLE_ANNO[a]), REG_DB[a]), trovato, usa: a };
+}
+function perScaglioni(R, sc) {
   let prec = 0, imp = 0;
-  sc.forEach(([lim, al]) => { if (R > prec) imp += (Math.min(R, lim) - prec) * al; prec = lim; });
-  return r2(imp);
+  (sc || []).forEach(([lim, al]) => { const top = lim == null ? Infinity : lim; if (R > prec) imp += (Math.min(R, top) - prec) * al / 100; prec = top; });
+  return imp;
 }
-function detrLavoro(R, giorni) {
-  let d = 0;
-  if (R <= 0) d = 0; else if (R <= 15000) d = 1955; else if (R <= 28000) d = 1910 + 1190 * (28000 - R) / 13000;
-  else if (R <= 50000) d = 1910 * (50000 - R) / 22000;
-  if (d > 0 && R > 25000 && R <= 35000) d += 65;
-  return r2(d * Math.min(giorni, 365) / 365);
+function detrLavoro(R, giorni, d) {
+  let x = 0;
+  if (R <= 0) x = 0; else if (R <= d.s1) x = d.d1; else if (R <= d.s2) x = d.d2 + d.d2x * (d.s2 - R) / (d.s2 - d.s1);
+  else if (R <= d.s3) x = d.d2 * (d.s3 - R) / (d.s3 - d.s2);
+  if (x > 0 && R > d.p65da && R <= d.p65a) x += d.p65;
+  return x * Math.min(giorni, 365) / 365;
 }
-function ulterioreDetr(anno, R, giorni) {
-  if (anno < 2025 || R <= 20000 || R > 40000) return 0;
-  const d = R <= 32000 ? 1000 : 1000 * (40000 - R) / 8000;
-  return r2(d * Math.min(giorni, 365) / 365);
+function ulterioreDetr(R, giorni, u) {
+  if (!u.importo || R <= u.da || R > u.fine) return 0;
+  const x = R <= u.piena ? u.importo : u.importo * (u.fine - R) / (u.fine - u.piena);
+  return x * Math.min(giorni, 365) / 365;
 }
-function calcola730(anno, rs, giorni, altre, oneri) {
-  const imponibile = r2(rs.reduce((a, r) => a + (Number(r.valori && r.valori.imp_irpef) || 0), 0));
-  const ritenute = r2(rs.reduce((a, r) => a + (Number(r.valori && r.valori.irpef_netto) || 0), 0));
-  const reddito = r2(Math.max(0, imponibile - oneri)), lorda = irpefLorda(anno, reddito), dl = detrLavoro(reddito, giorni), ul = ulterioreDetr(anno, reddito, giorni);
-  const netta = r2(Math.max(0, lorda - dl - ul - altre));
-  return { imponibile, oneri, reddito, lorda, dl, ul, altre, netta, ritenute, saldo: r2(netta - ritenute) };
+function addReg(R, a) {
+  if (!a.sc || !a.sc.length || R <= 0) return 0;
+  if (a.prog) return perScaglioni(R, a.sc);
+  const b = a.sc.find(([lim]) => lim == null || R <= lim) || a.sc[a.sc.length - 1];
+  return R * b[1] / 100;
+}
+// Nel 730 gli importi sono in euro interi: ogni passaggio è arrotondato all'euro (da 0,50 in su).
+function calcola730(anno, rs, giorni, altre, oneri, r) {
+  const S = k => rs.reduce((a, x) => a + (Number(x.valori && x.valori[k]) || 0), 0), R0 = Math.round;
+  const imponibile = R0(S('imp_irpef')), od = R0(oneri), reddito = Math.max(0, imponibile - od);
+  const lorda = R0(perScaglioni(reddito, r.irpef)), dl = R0(detrLavoro(reddito, giorni, r.detr)), ul = R0(ulterioreDetr(reddito, giorni, r.ulter)), al = R0(altre);
+  const netta = Math.max(0, lorda - dl - ul - al), ritenute = R0(S('irpef_netto'));
+  const prev = { lav: R0(S('fonte')), az: R0(S('fonte_az')), limite: r.prev }; prev.tot = prev.lav + prev.az;
+  const aReg = R0(addReg(reddito, r.addReg));
+  const aCom = (r.addCom.aliq && !(r.addCom.esenz && reddito <= r.addCom.esenz)) ? R0(reddito * r.addCom.aliq / 100) : 0;
+  return { imponibile, oneri: od, reddito, lorda, dl, ul, altre: al, netta, ritenute, saldo: netta - ritenute, prev, aReg, aCom, trReg: R0(S('add_reg')), trCom: R0(S('add_com')) };
 }
 // ==FINE_730==
+const eu0 = n => String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
 let P730 = { giorni: 365, altre: 0, oneri: 0 };
 async function render730(anno) {
   const box = await apriPannello('t_730'); if (!box) return;
@@ -487,20 +528,83 @@ async function render730(anno) {
     i.onchange = () => { const n = num(i.value); P730[k] = isNaN(n) ? 0 : n; render730(); };
     return h('div', { className: 'riga' }, h('label', {}, et), i);
   };
-  const rs = ST.filter(r => r.anno === anno), ordinari = rs.filter(r => r.mese <= 12).length;
-  const x = calcola730(anno, rs, P730.giorni, P730.altre, P730.oneri);
-  const righe = [['Imponibile dai cedolini (tutti i datori)', eur(x.imponibile)], ['Oneri deducibili aggiuntivi', '- ' + eur(x.oneri)], ['Reddito complessivo', eur(x.reddito)],
-    ['Imposta lorda', eur(x.lorda)], ['Detrazione lavoro dipendente', '- ' + eur(x.dl)], ['Ulteriore detrazione (dal 2025)', '- ' + eur(x.ul)], ['Altre detrazioni', '- ' + eur(x.altre)],
-    ['Imposta netta', eur(x.netta)], ['Ritenute già trattenute', '- ' + eur(x.ritenute)], [x.saldo > 0 ? 'Saldo: a DEBITO' : 'Saldo: a CREDITO', eur(Math.abs(x.saldo))]];
+  const g = regole(anno), r = g.r, rs = ST.filter(x => x.anno === anno), ordinari = rs.filter(x => x.mese <= 12).length;
+  const x = calcola730(anno, rs, P730.giorni, P730.altre, P730.oneri, r);
+  box.append(selAnno(anni, anno, render730));
+  if (!g.trovato) box.append(h('div', { className: 'msg ko' }, 'Le regole fiscali ' + anno + ' non sono state inserite: uso quelle del ' + g.usa + '. Controllale in Impostazioni.'));
+  box.append(campo('Giorni di lavoro nell\'anno (max 365)', 'giorni'), campo('Altre detrazioni in euro', 'altre'), campo('Oneri deducibili non già in busta paga', 'oneri'));
+  const righe = [['Imponibile dai cedolini (tutti i datori)', eu0(x.imponibile)], ['Oneri deducibili aggiuntivi', '- ' + eu0(x.oneri)], ['Reddito complessivo', eu0(x.reddito)],
+    ['Imposta lorda', eu0(x.lorda)], ['Detrazione lavoro dipendente', '- ' + eu0(x.dl)], ['Ulteriore detrazione', '- ' + eu0(x.ul)], ['Altre detrazioni', '- ' + eu0(x.altre)],
+    ['Imposta netta', eu0(x.netta)], ['Ritenute già trattenute', '- ' + eu0(x.ritenute)], [x.saldo > 0 ? 'Saldo Irpef: a DEBITO' : 'Saldo Irpef: a CREDITO', eu0(Math.abs(x.saldo))]];
   righe[righe.length - 1].tot = true;
-  const msg = h('div', { className: 'msg ' + (x.saldo > 0 ? 'ko' : 'ok') }, 'Stima: ' + (x.saldo > 0 ? 'da versare ' : 'da ricevere ') + eur(Math.abs(x.saldo)) + ' euro.');
-  box.append(selAnno(anni, anno, render730), campo('Giorni di lavoro nell\'anno (max 365)', 'giorni'), campo('Altre detrazioni in euro', 'altre'), campo('Oneri deducibili non già in busta paga', 'oneri'),
-    tab(['Passaggio', 'Importo'], righe, 1), msg,
-    h('p', {}, 'Mensilità ordinarie presenti: ' + ordinari + ' su 12' + (ordinari < 12 ? ' (anno incompleto: la stima non è attendibile)' : '') + '.'),
-    h('p', {}, 'Per confronto, detrazioni applicate nei cedolini: ' + eur(sommaVoce(rs, 'detr')) + '; calcolate qui: ' + eur(x.dl + x.ul) + '.'),
-    h('p', {}, 'Addizionali già trattenute: regionale ' + eur(sommaVoce(rs, 'add_reg')) + ', comunale ' + eur(sommaVoce(rs, 'add_com')) + ' (non ricalcolate).'),
-    h('p', {}, 'Aliquote ' + (anno >= 2026 ? '2026: 23% fino a 28.000, 33% fino a 50.000, 43% oltre.' : anno + ': 23% fino a 28.000, 35% fino a 50.000, 43% oltre.') +
-      ' Non incluse: familiari a carico, oneri detraibili, TFR, somma non imponibile fino a 20.000 euro; inserisci a mano ciò che manca nei campi sopra. È una stima di controllo, non sostituisce il 730 né un professionista.'));
+  box.append(h('h2', {}, 'Irpef'), tab(['Passaggio', 'Euro'], righe, 1),
+    h('div', { className: 'msg ' + (x.saldo > 0 ? 'ko' : 'ok') }, 'Stima Irpef: ' + (x.saldo > 0 ? 'da versare ' : 'da ricevere ') + eu0(Math.abs(x.saldo)) + ' euro.'));
+  const pr = x.prev, entro = pr.tot <= pr.limite;
+  box.append(h('h2', {}, 'Previdenza complementare'),
+    tab(['Voce', 'Euro'], [['Contributo lavoratore (Fonte)', eu0(pr.lav)], ['Contributo azienda (Fonte c/az)', eu0(pr.az)], ['Totale fondi pensione', eu0(pr.tot)], ['Limite di deducibilità', eu(pr.limite)]], 1),
+    h('p', {}, (entro ? 'Il totale è entro il limite. ' : 'Il totale supera il limite di deducibilità. ') + 'Il contributo versato tramite busta paga è già escluso dall\'imponibile dei cedolini, quindi non va dedotto di nuovo; solo i versamenti fatti fuori busta vanno negli oneri deducibili.'));
+  const lg = r.luogo || {}, reg = r.addReg.sc && r.addReg.sc.length, com = r.addCom.aliq > 0;
+  box.append(h('h2', {}, 'Addizionali' + (lg.regione || lg.comune ? ' (' + [lg.regione, lg.comune].filter(Boolean).join(' - ') + ')' : '')),
+    tab(['Voce', 'Euro'], [['Addizionale regionale dovuta', reg ? eu0(x.aReg) : 'aliquote non impostate'], ['Addizionale regionale trattenuta nei cedolini', eu0(x.trReg)],
+      ['Addizionale comunale dovuta', com ? eu0(x.aCom) : 'aliquota non impostata'], ['Addizionale comunale trattenuta nei cedolini', eu0(x.trCom)]], 1),
+    h('p', {}, 'Le addizionali si calcolano sul reddito complessivo con le aliquote della regione e del comune di residenza fiscale. L\'importo trattenuto nei cedolini comprende anche le rate dell\'anno precedente: il confronto è solo indicativo.'));
+  box.append(h('p', {}, 'Mensilità ordinarie presenti: ' + ordinari + ' su 12' + (ordinari < 12 ? ' (anno incompleto: la stima non è attendibile)' : '') + '. Importi arrotondati all\'euro come nel 730.'),
+    h('p', {}, 'Non incluse: familiari a carico, oneri detraibili, TFR, somma non imponibile fino a 20.000 euro; inserisci a mano ciò che manca nei campi sopra. È una stima di controllo, non sostituisce il 730 né un professionista.'));
+}
+
+// ---- Impostazioni: regole fiscali per anno e parametri ----
+async function renderSet(anno, messaggio) {
+  const box = $('t_set'); box.textContent = 'Carico...';
+  const q = await sb.from('ced_parametri').select('*').eq('profilo_id', PROF.id);
+  if (q.error) { box.textContent = 'Errore: ' + q.error.message; return; }
+  applicaParametri(q.data); ricalcola();
+  anno = anno || new Date().getFullYear();
+  const anni = []; for (let a = 2024; a <= new Date().getFullYear() + 1; a++) anni.push(a);
+  const g = regole(anno), r = g.r, F = {};
+  const mostra = (txt, cls) => { const d = h('div', { className: 'msg ' + cls }, txt); box.prepend(d); };
+  const nf = (et, v, k) => { const i = h('input', { value: v == null ? '' : String(v).replace('.', ','), inputMode: 'decimal' }); F[k] = i; return h('div', { className: 'riga' }, h('label', {}, et), i); };
+  const nt = (et, v, k) => { const e = nf(et, v, k); F[k].style = 'text-align:left'; return e; };
+  const n = k => { const x = num(F[k].value); return isNaN(x) ? 0 : x; };
+  const nn = k => F[k].value.trim() === '' ? null : n(k);
+  box.innerHTML = '';
+  const s = h('select', { onchange: () => renderSet(Number(s.value)) }, anni.map(a => new Option(a, a, false, a === anno)));
+  box.append(h('h2', {}, 'Regole fiscali per anno'), h('div', { className: 'riga' }, h('label', {}, 'Anno'), s));
+  if (!g.trovato) box.append(h('div', { className: 'msg ko' }, 'Per il ' + anno + ' non hai ancora inserito le regole: sto usando quelle del ' + g.usa + '. Controlla i numeri qui sotto e premi Salva.'));
+  box.append(nt('Regione di residenza', r.luogo.regione, 'reg'), nt('Comune di residenza', r.luogo.comune, 'com'), h('h2', {}, 'Scaglioni Irpef'),
+    nf('1° scaglione: fino a (euro)', r.irpef[0][0], 'i1'), nf('1° aliquota %', r.irpef[0][1], 'p1'), nf('2° scaglione: fino a (euro)', r.irpef[1][0], 'i2'), nf('2° aliquota %', r.irpef[1][1], 'p2'),
+    nf('Oltre: aliquota %', r.irpef[2][1], 'p3'), h('h2', {}, 'Detrazione lavoro dipendente'),
+    nf('Importo fisso fino alla 1ª soglia', r.detr.d1, 'd1'), nf('1ª soglia (euro)', r.detr.s1, 's1'), nf('Importo base 2ª fascia', r.detr.d2, 'd2'), nf('Importo variabile 2ª fascia', r.detr.d2x, 'd2x'),
+    nf('2ª soglia (euro)', r.detr.s2, 's2'), nf('3ª soglia, oltre non spetta (euro)', r.detr.s3, 's3'), nf('Aumento fisso (65 euro)', r.detr.p65, 'p65'), nf('Aumento: da reddito oltre (euro)', r.detr.p65da, 'p65da'),
+    nf('Aumento: fino a reddito (euro)', r.detr.p65a, 'p65a'), h('h2', {}, 'Ulteriore detrazione (dal 2025)'),
+    nf('Importo (0 se non c\'è)', r.ulter.importo, 'u1'), nf('Spetta da reddito oltre (euro)', r.ulter.da, 'u2'), nf('Piena fino a (euro)', r.ulter.piena, 'u3'), nf('Si azzera a (euro)', r.ulter.fine, 'u4'),
+    h('h2', {}, 'Previdenza complementare'), nf('Limite di deducibilità (euro)', r.prev, 'prev'), h('h2', {}, 'Addizionale regionale'));
+  const cb = h('input', { type: 'checkbox', checked: !!r.addReg.prog }); F.prog = cb;
+  box.append(h('div', { className: 'riga' }, h('label', {}, 'Aliquote a scaglioni progressivi'), cb), h('p', {}, 'Scrivi gli scaglioni in ordine. Nell\'ultima riga lascia vuoto "fino a" (vale per il reddito oltre).'));
+  for (let i = 1; i <= 5; i++) { const sc = (r.addReg.sc || [])[i - 1] || [null, null]; box.append(nf('Riga ' + i + ': fino a (euro)', sc[0], 'r' + i + 'f'), nf('Riga ' + i + ': aliquota %', sc[1], 'r' + i + 'p')); }
+  box.append(h('h2', {}, 'Addizionale comunale'), nf('Aliquota %', r.addCom.aliq, 'c1'), nf('Esente fino a (euro, 0 se non c\'è)', r.addCom.esenz, 'c2'));
+  box.append(h('p', {}, h('button', { className: 'p', onclick: async () => {
+    const nuove = {
+      luogo: { regione: F.reg.value.trim(), comune: F.com.value.trim() },
+      irpef: [[nn('i1'), n('p1')], [nn('i2'), n('p2')], [null, n('p3')]],
+      detr: { d1: n('d1'), s1: n('s1'), d2: n('d2'), s2: n('s2'), d2x: n('d2x'), s3: n('s3'), p65: n('p65'), p65da: n('p65da'), p65a: n('p65a') },
+      ulter: { importo: n('u1'), da: n('u2'), piena: n('u3'), fine: n('u4') }, prev: n('prev'),
+      addReg: { prog: F.prog.checked, sc: [1, 2, 3, 4, 5].map(i => [nn('r' + i + 'f'), nn('r' + i + 'p')]).filter(z => z[1] !== null) },
+      addCom: { aliq: n('c1'), esenz: n('c2') }
+    };
+    const { error } = await sb.from('ced_parametri').upsert({ profilo_id: PROF.id, nome: 'regole_' + anno, valore: JSON.stringify(nuove), spiegazione: 'Regole fiscali ' + anno }, { onConflict: 'profilo_id,nome' });
+    if (error) { mostra('Errore: ' + error.message, 'ko'); return; }
+    renderSet(anno, 'Regole ' + anno + ' salvate.');
+  } }, 'Salva regole ' + anno)));
+  box.append(h('h2', {}, 'Altri parametri (datore, TFR, ratei)'));
+  q.data.filter(x => !/^regole_\d{4}$/.test(x.nome)).forEach(x => {
+    const i = h('input', { value: x.valore, title: x.spiegazione || '' });
+    i.onchange = async () => {
+      const { error } = await sb.from('ced_parametri').update({ valore: i.value.trim() }).eq('id', x.id);
+      if (error) mostra('Errore: ' + error.message, 'ko'); else renderSet(anno, 'Parametro "' + x.nome + '" aggiornato.');
+    };
+    box.append(h('div', { className: 'riga' }, h('label', { title: x.spiegazione || '' }, x.nome), i));
+  });
+  if (messaggio) mostra(messaggio, 'ok');
 }
 if (!sb) $('lerr').textContent = MSG_SB;
 </script>
