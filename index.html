@@ -54,6 +54,7 @@ table{border-collapse:collapse;width:100%;font-size:13px;margin:6px 0}th,td{bord
   </div>
   <div id="t_mese" class="nasc"></div><div id="t_cu" class="nasc"></div><div id="t_730" class="nasc"></div><div id="t_set" class="nasc"></div>
 </div>
+<p id="ver" style="color:var(--mut);font-size:12px;margin-top:24px">Versione del sito: 7 novembre, C</p>
 </main>
 <div id="barra" class="nasc">
   <div id="sq">Compila il netto</div>
@@ -65,6 +66,7 @@ table{border-collapse:collapse;width:100%;font-size:13px;margin:6px 0}th,td{bord
 // ==== DA COMPILARE: li trovi in Supabase > Project Settings > API ====
 const SUPABASE_URL = 'https://gqqqmnjyjtxyvqrypgkd.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_pWW3RId2OnNfcupr_wMixg_KlTXFuQ9';
+
 
 // Data delle scritture nel file GnuCash: come la tua calcolaDataCompetenza
 // (13 = 20/12, 14 = 20/06, gli altri mesi = ultimo giorno del mese).
@@ -544,26 +546,35 @@ async function render730(anno) {
   box.append(selAnno(anni, anno, render730));
   if (!g.trovato) box.append(h('div', { className: 'msg ko' }, 'Le regole fiscali ' + anno + ' non sono state inserite: uso quelle del ' + g.usa + '. Controllale in Impostazioni.'));
   box.append(h('div', { className: 'riga' }, h('label', {}, 'Giorni di lavoro nell\'anno (max 365)'), gi));
-  const conf = (et, ced, calc) => { const d = ced - calc; return h('tr', {}, h('td', {}, et), h('td', { className: 'n' }, eu0(ced)), h('td', { className: 'n' }, eu0(calc)), h('td', { className: 'n ' + (Math.abs(d) <= 2 ? 'dok' : 'dko') }, (d > 0 ? '+' : '') + eu0(d))); };
-  const t = h('table', {}, h('tr', {}, ['Voce', 'Dai cedolini', 'Dal calcolo', 'Differenza'].map((z, i) => h('th', { className: i ? 'n' : '' }, z))),
-    conf('Imposta lorda', x.ced.lorda, x.lorda), conf('Detrazioni', x.ced.detr, x.detr), conf('Irpef (imposta netta)', x.ced.netta, x.netta));
-  const dN = x.ced.netta - x.netta, ok = Math.abs(dN) <= 2;
-  box.append(h('h2', {}, 'Irpef: cedolini e calcolo'), h('p', {}, 'Imponibile dai cedolini: ' + eu0(x.reddito) + ' euro.'), h('div', { className: 'sc' }, t),
-    h('div', { className: 'msg ' + (ok ? 'ok' : 'ko') }, ok ? 'L\'Irpef pagata nei cedolini coincide con il calcolo (differenza ' + eu0(dN) + ' euro).'
-      : (dN > 0 ? 'Nei cedolini hai pagato ' + eu0(dN) + ' euro in PIÙ del calcolo: sarebbe a credito.' : 'Nei cedolini hai pagato ' + eu0(-dN) + ' euro in MENO del calcolo: sarebbe a debito.') + '\nGuarda la riga delle detrazioni per capire da dove nasce.'));
+  const reg = !!(r.addReg.sc && r.addReg.sc.length), com = r.addCom.aliq > 0, lg = r.luogo || {};
+  const dIrpef = x.netta - x.ced.netta, totale = dIrpef + (reg ? x.regDaPagare : 0) + (com ? x.saldoCom : 0);
+  const cella = (v, cls) => h('td', { className: 'n' + (cls ? ' ' + cls : '') }, v === null ? '-' : eu0(v));
+  const riga = (et, ced, calc, dp, ctrl, forte) => h('tr', { className: forte ? 'tot' : '' }, h('td', {}, et), cella(ced), cella(calc), cella(dp, ctrl ? (Math.abs(dp) <= 2 ? 'dok' : 'dko') : ''));
+  const t = h('table', {}, h('tr', {}, ['Voce', 'Cedolini', 'Calcolo', 'Da pagare'].map((z, k) => h('th', { className: k ? 'n' : '' }, z))),
+    riga('Imposta lorda', x.ced.lorda, x.lorda, x.lorda - x.ced.lorda, true),
+    riga('Detrazioni', x.ced.detr, x.detr, x.ced.detr - x.detr, true),
+    riga('Irpef netta', x.ced.netta, x.netta, dIrpef, true, true),
+    riga('Addizionale regionale', x.regPag, reg ? x.aReg : null, reg ? x.regDaPagare : null),
+    riga('Addizionale comunale (saldo)', x.accPag, com ? x.aCom : null, com ? x.saldoCom : null),
+    riga('Totale da pagare nei cedolini del ' + (anno + 1), null, null, totale, false, true),
+    riga('Acconto comunale ' + (anno + 1), null, com ? x.accNuovo : null, com ? x.accNuovo : null));
+  box.append(h('h2', {}, 'Cedolini, calcolo e da pagare' + (lg.regione || lg.comune ? ' (' + [lg.regione, lg.comune].filter(Boolean).join(' - ') + ')' : '')),
+    h('p', {}, 'Imponibile dai cedolini: ' + eu0(x.reddito) + ' euro.'), h('div', { className: 'sc' }, t),
+    h('p', {}, 'Cedolini = quanto già trattenuto o applicato. Calcolo = quanto risulta dovuto. Da pagare = Calcolo meno Cedolini (se è negativo è a credito); per le detrazioni è il contrario: se in busta ne hai avute più del dovuto, la differenza va restituita. Per le righe Irpef il colore dice se la differenza è entro 2 euro.'));
+  const ok = Math.abs(dIrpef) <= 2;
+  box.append(h('div', { className: 'msg ' + (ok ? 'ok' : 'ko') }, ok ? 'L\'Irpef dei cedolini coincide con il calcolo (differenza ' + eu0(dIrpef) + ' euro).'
+    : (dIrpef < 0 ? 'Nei cedolini hai pagato ' + eu0(-dIrpef) + ' euro in PIÙ del calcolo: sarebbe a credito.' : 'Nei cedolini hai pagato ' + eu0(dIrpef) + ' euro in MENO del calcolo: sarebbe a debito.') + '\nGuarda le righe lorda e detrazioni per capire da dove nasce.'));
+  const rate = [];
+  if (reg && x.regDaPagare > 0) rate.push('regionale ' + eu0(x.regDaPagare / 11) + ' al mese per 11 mesi (gennaio-novembre)');
+  if (com && x.saldoCom > 0) rate.push('saldo comunale ' + eu0(x.saldoCom / 11) + ' al mese per 11 mesi');
+  if (com && x.accNuovo > 0) rate.push('acconto comunale ' + eu0(x.accNuovo / 9) + ' al mese per 9 mesi (marzo-novembre)');
+  if (rate.length) box.append(h('p', {}, 'Rate indicative: ' + rate.join('; ') + '.'));
   const pr = x.prev;
   box.append(h('h2', {}, 'Previdenza complementare'),
     tab(['Voce', 'Euro'], [['Contributo lavoratore (Fonte)', eu0(pr.lav)], ['Contributo azienda (Fonte c/az)', eu0(pr.az)], ['Totale fondi pensione', eu0(pr.tot)], ['Limite di deducibilità', eu(pr.limite)]], 1),
-    h('p', {}, (pr.tot <= pr.limite ? 'Il totale è entro il limite. ' : 'Il totale supera il limite di deducibilità. ') + 'Quanto versato in busta paga è già escluso dall\'imponibile dei cedolini.'));
-  const rata = (tot, n) => tot > 0 ? ' (circa ' + eu0(tot / n) + ' al mese)' : '', lg = r.luogo || {}, reg = r.addReg.sc && r.addReg.sc.length, com = r.addCom.aliq > 0;
-  box.append(h('h2', {}, 'Addizionali' + (lg.regione || lg.comune ? ' (' + [lg.regione, lg.comune].filter(Boolean).join(' - ') + ')' : '')),
-    tab(['Regionale', 'Euro'], [['Dovuta sul reddito ' + anno, reg ? eu0(x.aReg) : 'aliquote non impostate'], ['Già trattenuta per il ' + anno + ' (cedolino di chiusura)', eu0(x.regPag)],
-      ['Da pagare nei cedolini del ' + (anno + 1) + ' (11 rate, gennaio-novembre)', reg ? eu0(x.regDaPagare) + rata(x.regDaPagare, 11) : '-']], 1),
-    tab(['Comunale', 'Euro'], [['Dovuta sul reddito ' + anno, com ? eu0(x.aCom) : 'aliquota non impostata'], ['Acconto già pagato per il ' + anno, eu0(x.accPag)],
-      ['Saldo da pagare nei cedolini del ' + (anno + 1) + ' (11 rate)', com ? eu0(x.saldoCom) + rata(x.saldoCom, 11) : '-'],
-      ['Acconto da pagare per il ' + (anno + 1) + ' (' + (r.addCom.accPerc || 0) + '%, 9 rate marzo-novembre)', com ? eu0(x.accNuovo) + rata(x.accNuovo, 9) : '-']], 1),
-    h('p', {}, 'Nel cedolino di chiusura (dimissioni) l\'addizionale include anche quella dell\'anno in corso: indicane la parte nei campi "anno in corso" (Inserisci o Mese), così il calcolo non la conta due volte. Il file GnuCash non cambia.'));
-  box.append(h('p', {}, 'Mensilità ordinarie presenti: ' + ordinari + ' su 12' + (ordinari < 12 ? ' (anno incompleto: il confronto non è attendibile)' : '') + '. Importi arrotondati all\'euro come nel 730. Non incluse: familiari a carico, oneri, TFR. È una stima di controllo, non sostituisce il 730 né un professionista.'));
+    h('p', {}, (pr.tot <= pr.limite ? 'Il totale è entro il limite. ' : 'Il totale supera il limite di deducibilità. ') + 'Quanto versato in busta paga è già escluso dall\'imponibile dei cedolini.'),
+    h('p', {}, 'Nel cedolino di chiusura (dimissioni) l\'addizionale include anche quella dell\'anno in corso: indicane la parte nei campi "anno in corso" (Inserisci o Mese), così il calcolo non la conta due volte. Il file GnuCash non cambia.'),
+    h('p', {}, 'Mensilità ordinarie presenti: ' + ordinari + ' su 12' + (ordinari < 12 ? ' (anno incompleto: il confronto non è attendibile)' : '') + '. Importi arrotondati all\'euro come nel 730. Non incluse: familiari a carico, oneri, TFR. È una stima di controllo, non sostituisce il 730 né un professionista.'));
 }
 
 // ---- Impostazioni: regole fiscali per anno e parametri ----
@@ -620,14 +631,14 @@ async function renderSet(anno, messaggio) {
       try { await navigator.clipboard.writeText(JSON.stringify(Object.assign({ anno }, r))); mostra('Regole del ' + anno + ' copiate: puoi incollarle in chat.', 'ok'); }
       catch (e) { mostra('Non riesco a copiare: ' + e.message, 'ko'); }
     } }, 'Copia le regole di questo anno'))));
-  box.append(nt('Regione di residenza', r.luogo.regione, 'reg'), nt('Comune di residenza', r.luogo.comune, 'com'), h('p', {}, bCerca, stato), h('h2', {}, 'Scaglioni Irpef'),
+  box.append(nt('Regione di residenza', r.luogo.regione, 'reg'), nt('Comune di residenza', r.luogo.comune, 'com'), h('p', {}, bCerca, stato), h('details', {}, h('summary', {}, 'Regole nazionali (Irpef, detrazioni, previdenza): cambiano di rado'), h('h2', {}, 'Scaglioni Irpef'),
     nf('1° scaglione: fino a (euro)', r.irpef[0][0], 'i1'), nf('1° aliquota %', r.irpef[0][1], 'p1'), nf('2° scaglione: fino a (euro)', r.irpef[1][0], 'i2'), nf('2° aliquota %', r.irpef[1][1], 'p2'),
     nf('Oltre: aliquota %', r.irpef[2][1], 'p3'), h('h2', {}, 'Detrazione lavoro dipendente'),
     nf('Importo fisso fino alla 1ª soglia', r.detr.d1, 'd1'), nf('1ª soglia (euro)', r.detr.s1, 's1'), nf('Importo base 2ª fascia', r.detr.d2, 'd2'), nf('Importo variabile 2ª fascia', r.detr.d2x, 'd2x'),
     nf('2ª soglia (euro)', r.detr.s2, 's2'), nf('3ª soglia, oltre non spetta (euro)', r.detr.s3, 's3'), nf('Aumento fisso (65 euro)', r.detr.p65, 'p65'), nf('Aumento: da reddito oltre (euro)', r.detr.p65da, 'p65da'),
     nf('Aumento: fino a reddito (euro)', r.detr.p65a, 'p65a'), h('h2', {}, 'Ulteriore detrazione (dal 2025)'),
     nf('Importo (0 se non c\'è)', r.ulter.importo, 'u1'), nf('Spetta da reddito oltre (euro)', r.ulter.da, 'u2'), nf('Piena fino a (euro)', r.ulter.piena, 'u3'), nf('Si azzera a (euro)', r.ulter.fine, 'u4'),
-    h('h2', {}, 'Previdenza complementare'), nf('Limite di deducibilità (euro)', r.prev, 'prev'), h('h2', {}, 'Addizionale regionale'));
+    h('h2', {}, 'Previdenza complementare'), nf('Limite di deducibilità (euro)', r.prev, 'prev')), h('h2', {}, 'Addizionale regionale'));
   const cb = h('input', { type: 'checkbox', checked: !!r.addReg.prog }); F.prog = cb;
   box.append(h('div', { className: 'riga' }, h('label', {}, 'Aliquote a scaglioni progressivi'), cb), h('p', {}, 'Scrivi gli scaglioni in ordine. Nell\'ultima riga lascia vuoto "fino a" (vale per il reddito oltre).'));
   for (let i = 1; i <= 5; i++) { const sc = (r.addReg.sc || [])[i - 1] || [null, null]; box.append(nf('Riga ' + i + ': fino a (euro)', sc[0], 'r' + i + 'f'), nf('Riga ' + i + ': aliquota %', sc[1], 'r' + i + 'p')); }
