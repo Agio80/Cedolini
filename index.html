@@ -54,7 +54,7 @@ table{border-collapse:collapse;width:100%;font-size:13px;margin:6px 0}th,td{bord
   </div>
   <div id="t_mese" class="nasc"></div><div id="t_cu" class="nasc"></div><div id="t_730" class="nasc"></div><div id="t_set" class="nasc"></div>
 </div>
-<p id="ver" style="color:var(--mut);font-size:12px;margin-top:24px">Versione del sito: 7 novembre, C</p>
+<p id="ver" style="color:var(--mut);font-size:12px;margin-top:24px">Versione del sito: 7 novembre, D</p>
 </main>
 <div id="barra" class="nasc">
   <div id="sq">Compila il netto</div>
@@ -64,9 +64,8 @@ table{border-collapse:collapse;width:100%;font-size:13px;margin:6px 0}th,td{bord
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script>
 // ==== DA COMPILARE: li trovi in Supabase > Project Settings > API ====
-const SUPABASE_URL = 'https://gqqqmnjyjtxyvqrypgkd.supabase.co';
-const SUPABASE_KEY = 'sb_publishable_pWW3RId2OnNfcupr_wMixg_KlTXFuQ9';
-
+const SUPABASE_URL = 'INCOLLA_QUI_PROJECT_URL';
+const SUPABASE_KEY = 'INCOLLA_QUI_ANON_PUBLIC_KEY';
 
 // Data delle scritture nel file GnuCash: come la tua calcolaDataCompetenza
 // (13 = 20/12, 14 = 20/06, gli altri mesi = ultimo giorno del mese).
@@ -123,9 +122,11 @@ async function carica() {
 }
 
 function applicaParametri(righe) {
-  P = {}; REG_DB = {};
+  P = {}; REG_DB = {}; CALC_DB = {};
   righe.forEach(r => {
-    if (/^regole_\d{4}$/.test(r.nome)) { try { REG_DB[Number(r.nome.slice(7))] = JSON.parse(r.valore); } catch (e) { } }
+    const reg = /^regole_(\d{4})$/.exec(r.nome), cal = /^calc730_(\d{4})$/.exec(r.nome);
+    if (reg) { try { REG_DB[Number(reg[1])] = JSON.parse(r.valore); } catch (e) { } }
+    else if (cal) { try { CALC_DB[Number(cal[1])] = JSON.parse(r.valore); } catch (e) { } }
     else P[r.nome] = /^-?\d+(\.\d+)?$/.test(r.valore) ? Number(r.valore) : r.valore;
   });
 }
@@ -470,7 +471,13 @@ function regole(anno) {
   const noti = Object.keys(REGOLE_ANNO).concat(Object.keys(REG_DB)).map(Number);
   let a = anno; const trovato = noti.includes(anno);
   if (!trovato) { const prec = noti.filter(x => x < anno).sort((x, y) => y - x)[0]; if (prec !== undefined) a = prec; }
-  return { r: fondi(fondi(REGOLE_BASE, REGOLE_ANNO[a]), REG_DB[a]), trovato, usa: a };
+  const r = Object.assign({}, fondi(fondi(REGOLE_BASE, REGOLE_ANNO[a]), REG_DB[a]));
+  let ereditaDa = null;
+  if (!(REG_DB[a] && REG_DB[a].addReg)) {
+    const con = Object.keys(REG_DB).map(Number).filter(y => REG_DB[y].addReg).sort((p, q) => Math.abs(p - a) - Math.abs(q - a) || q - p)[0];
+    if (con !== undefined) { r.addReg = REG_DB[con].addReg; r.addCom = fondi(REGOLE_BASE.addCom, REG_DB[con].addCom); r.luogo = fondi(REGOLE_BASE.luogo, REG_DB[con].luogo); ereditaDa = con; }
+  }
+  return { r, trovato, usa: a, ereditaDa };
 }
 function perScaglioni(R, sc) {
   let prec = 0, imp = 0;
@@ -536,17 +543,8 @@ function filtra(o, base, perc, errori, extra) {
 const eu0 = n => String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
 let P730 = { giorni: 365 };
 let PRE = null;
-async function render730(anno) {
-  const box = await apriPannello('t_730'); if (!box) return;
-  const anni = anniOk(); anno = anno || P730.anno || anni[0]; P730.anno = anno;
-  const gi = h('input', { value: String(P730.giorni), inputMode: 'decimal' });
-  gi.onchange = () => { const n = num(gi.value); P730.giorni = (isNaN(n) || n <= 0) ? 365 : Math.min(n, 365); render730(); };
-  const g = regole(anno), r = g.r, rs = ST.filter(z => z.anno === anno), ordinari = rs.filter(z => z.mese <= 12).length;
-  const x = calcola730(anno, rs, P730.giorni, r);
-  box.append(selAnno(anni, anno, render730));
-  if (!g.trovato) box.append(h('div', { className: 'msg ko' }, 'Le regole fiscali ' + anno + ' non sono state inserite: uso quelle del ' + g.usa + '. Controllale in Impostazioni.'));
-  box.append(h('div', { className: 'riga' }, h('label', {}, 'Giorni di lavoro nell\'anno (max 365)'), gi));
-  const reg = !!(r.addReg.sc && r.addReg.sc.length), com = r.addCom.aliq > 0, lg = r.luogo || {};
+let CALC_DB = {};
+function tab730(anno, x, reg, com) {
   const dIrpef = x.netta - x.ced.netta, totale = dIrpef + (reg ? x.regDaPagare : 0) + (com ? x.saldoCom : 0);
   const cella = (v, cls) => h('td', { className: 'n' + (cls ? ' ' + cls : '') }, v === null ? '-' : eu0(v));
   const riga = (et, ced, calc, dp, ctrl, forte) => h('tr', { className: forte ? 'tot' : '' }, h('td', {}, et), cella(ced), cella(calc), cella(dp, ctrl ? (Math.abs(dp) <= 2 ? 'dok' : 'dko') : ''));
@@ -558,17 +556,56 @@ async function render730(anno) {
     riga('Addizionale comunale (saldo)', x.accPag, com ? x.aCom : null, com ? x.saldoCom : null),
     riga('Totale da pagare nei cedolini del ' + (anno + 1), null, null, totale, false, true),
     riga('Acconto comunale ' + (anno + 1), null, com ? x.accNuovo : null, com ? x.accNuovo : null));
+  return { t: h('div', { className: 'sc' }, t), dIrpef, totale };
+}
+async function render730(anno) {
+  const box = await apriPannello('t_730'); if (!box) return;
+  const anni = anniOk(); anno = anno || P730.anno || anni[0]; P730.anno = anno;
+  const gi = h('input', { value: String(P730.giorni), inputMode: 'decimal' });
+  gi.onchange = () => { const n = num(gi.value); P730.giorni = (isNaN(n) || n <= 0) ? 365 : Math.min(n, 365); render730(); };
+  const g = regole(anno), r = g.r, rs = ST.filter(z => z.anno === anno), ordinari = rs.filter(z => z.mese <= 12).length;
+  const x = calcola730(anno, rs, P730.giorni, r);
+  box.append(selAnno(anni, anno, render730));
+  if (!g.trovato) box.append(h('div', { className: 'msg ko' }, 'Le regole fiscali ' + anno + ' non sono state inserite: uso quelle del ' + g.usa + '. Controllale in Impostazioni.'));
+  if (g.ereditaDa && g.ereditaDa !== anno) box.append(h('p', {}, 'Addizionali: per il ' + anno + ' non le hai impostate, uso le aliquote del ' + g.ereditaDa + '.'));
+  box.append(h('div', { className: 'riga' }, h('label', {}, 'Giorni di lavoro nell\'anno (max 365)'), gi));
+  const reg = !!(r.addReg.sc && r.addReg.sc.length), com = r.addCom.aliq > 0, lg = r.luogo || {};
+  const T = tab730(anno, x, reg, com);
   box.append(h('h2', {}, 'Cedolini, calcolo e da pagare' + (lg.regione || lg.comune ? ' (' + [lg.regione, lg.comune].filter(Boolean).join(' - ') + ')' : '')),
-    h('p', {}, 'Imponibile dai cedolini: ' + eu0(x.reddito) + ' euro.'), h('div', { className: 'sc' }, t),
+    h('p', {}, 'Imponibile dai cedolini: ' + eu0(x.reddito) + ' euro.'), T.t,
     h('p', {}, 'Cedolini = quanto già trattenuto o applicato. Calcolo = quanto risulta dovuto. Da pagare = Calcolo meno Cedolini (se è negativo è a credito); per le detrazioni è il contrario: se in busta ne hai avute più del dovuto, la differenza va restituita. Per le righe Irpef il colore dice se la differenza è entro 2 euro.'));
-  const ok = Math.abs(dIrpef) <= 2;
-  box.append(h('div', { className: 'msg ' + (ok ? 'ok' : 'ko') }, ok ? 'L\'Irpef dei cedolini coincide con il calcolo (differenza ' + eu0(dIrpef) + ' euro).'
-    : (dIrpef < 0 ? 'Nei cedolini hai pagato ' + eu0(-dIrpef) + ' euro in PIÙ del calcolo: sarebbe a credito.' : 'Nei cedolini hai pagato ' + eu0(dIrpef) + ' euro in MENO del calcolo: sarebbe a debito.') + '\nGuarda le righe lorda e detrazioni per capire da dove nasce.'));
+  const dI = T.dIrpef, ok = Math.abs(dI) <= 2;
+  box.append(h('div', { className: 'msg ' + (ok ? 'ok' : 'ko') }, ok ? 'L\'Irpef dei cedolini coincide con il calcolo (differenza ' + eu0(dI) + ' euro).'
+    : (dI < 0 ? 'Nei cedolini hai pagato ' + eu0(-dI) + ' euro in PIÙ del calcolo: sarebbe a credito.' : 'Nei cedolini hai pagato ' + eu0(dI) + ' euro in MENO del calcolo: sarebbe a debito.') + '\nGuarda le righe lorda e detrazioni per capire da dove nasce.'));
   const rate = [];
   if (reg && x.regDaPagare > 0) rate.push('regionale ' + eu0(x.regDaPagare / 11) + ' al mese per 11 mesi (gennaio-novembre)');
   if (com && x.saldoCom > 0) rate.push('saldo comunale ' + eu0(x.saldoCom / 11) + ' al mese per 11 mesi');
   if (com && x.accNuovo > 0) rate.push('acconto comunale ' + eu0(x.accNuovo / 9) + ' al mese per 9 mesi (marzo-novembre)');
   if (rate.length) box.append(h('p', {}, 'Rate indicative: ' + rate.join('; ') + '.'));
+  // ---- calcoli salvati ----
+  const avviso = t => box.append(h('div', { className: 'msg ko' }, t));
+  box.append(h('p', {}, h('button', { className: 'p', onclick: async () => {
+    const dati = { anno, salvato: new Date().toISOString(), giorni: P730.giorni, ordinari, reg, com, luogo: lg, x };
+    const { error } = await sb.from('ced_parametri').upsert({ profilo_id: PROF.id, nome: 'calc730_' + anno, valore: JSON.stringify(dati), spiegazione: 'Calcolo 730 salvato, anno ' + anno }, { onConflict: 'profilo_id,nome' });
+    if (error) { avviso('Errore nel salvataggio: ' + error.message); return; }
+    CALC_DB[anno] = dati; render730(anno);
+  } }, (CALC_DB[anno] ? 'Aggiorna il calcolo salvato del ' : 'Salva questo calcolo del ') + anno)));
+  const salvati = Object.keys(CALC_DB).map(Number).sort((p, q) => q - p), vis = h('div', {});
+  if (salvati.length) box.append(h('h2', {}, 'Calcoli salvati'));
+  salvati.forEach(a => {
+    const d = CALC_DB[a], xs = d.x, data = new Date(d.salvato).toLocaleDateString('it-IT');
+    const tot = (xs.netta - xs.ced.netta) + (d.reg ? xs.regDaPagare : 0) + (d.com ? xs.saldoCom : 0);
+    box.append(h('div', { className: 'riga' }, h('label', {}, a + ' (salvato il ' + data + ')'), h('span', { style: 'flex:1;text-align:right' }, 'da pagare ' + eu0(tot)),
+      h('button', { onclick: () => { vis.innerHTML = ''; vis.append(h('h2', {}, 'Calcolo del ' + a + ', salvato il ' + data), tab730(a, d.x, d.reg, d.com).t,
+        h('p', {}, 'Giorni di lavoro: ' + d.giorni + '. Mensilità ordinarie: ' + d.ordinari + '.')); vis.scrollIntoView(); } }, 'Mostra'),
+      h('button', { onclick: async () => {
+        if (!confirm('Elimino il calcolo salvato del ' + a + '?')) return;
+        const { error } = await sb.from('ced_parametri').delete().eq('profilo_id', PROF.id).eq('nome', 'calc730_' + a);
+        if (error) { avviso('Errore: ' + error.message); return; }
+        delete CALC_DB[a]; render730(anno);
+      } }, 'Elimina')));
+  });
+  box.append(vis);
   const pr = x.prev;
   box.append(h('h2', {}, 'Previdenza complementare'),
     tab(['Voce', 'Euro'], [['Contributo lavoratore (Fonte)', eu0(pr.lav)], ['Contributo azienda (Fonte c/az)', eu0(pr.az)], ['Totale fondi pensione', eu0(pr.tot)], ['Limite di deducibilità', eu(pr.limite)]], 1),
@@ -613,6 +650,7 @@ async function renderSet(anno, messaggio) {
   const s = h('select', { onchange: () => renderSet(Number(s.value)) }, anni.map(a => new Option(a, a, false, a === anno)));
   box.append(h('h2', {}, 'Regole fiscali per anno'), h('div', { className: 'riga' }, h('label', {}, 'Anno'), s));
   if (!g.trovato) box.append(h('div', { className: 'msg ko' }, 'Per il ' + anno + ' non hai ancora inserito le regole: sto usando quelle del ' + g.usa + '. Controlla i numeri qui sotto e premi Salva.'));
+  if (g.ereditaDa && !pre) box.append(h('div', { className: 'msg ko' }, 'Per il ' + anno + ' non hai impostato le addizionali: mostro quelle del ' + g.ereditaDa + '. Premi Salva per fissarle anche per il ' + anno + '.'));
   if (pre) {
     box.append(h('div', { className: 'msg ok' }, 'Regole incollate: controlla i campi e premi Salva. Non sono ancora salvate.' + (pre.note ? '\nNote: ' + pre.note : '')));
     if (Object.keys(pre.extra).length) box.append(h('div', { className: 'msg ko' }, 'La pagina non conosce queste voci: ' + Object.keys(pre.extra).join(', ') + '. Le conservo quando salvi, ma non entrano nel calcolo. Scrivimi cosa sono e le aggiungo.'));
@@ -658,7 +696,7 @@ async function renderSet(anno, messaggio) {
     renderSet(anno, 'Regole ' + anno + ' salvate.');
   } }, 'Salva regole ' + anno)));
   box.append(h('h2', {}, 'Altri parametri (datore, TFR, ratei)'));
-  q.data.filter(x => !/^regole_\d{4}$/.test(x.nome)).forEach(x => {
+  q.data.filter(x => !/^(regole|calc730)_\d{4}$/.test(x.nome)).forEach(x => {
     const i = h('input', { value: x.valore, title: x.spiegazione || '' });
     i.onchange = async () => {
       const { error } = await sb.from('ced_parametri').update({ valore: i.value.trim() }).eq('id', x.id);
