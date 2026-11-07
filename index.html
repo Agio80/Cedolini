@@ -28,7 +28,7 @@ button.p{background:var(--acc);color:var(--sf)}button:disabled{opacity:.5}
 table{border-collapse:collapse;width:100%;font-size:13px;margin:6px 0}th,td{border:1px solid var(--riga);padding:4px 6px;text-align:left}td.n{text-align:right;font-variant-numeric:tabular-nums}
 .nasc{display:none}
 #nav{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 4px}#nav button.on{background:var(--acc);color:var(--sf)}
-.sc{overflow-x:auto}tr.tot td{font-weight:700}th.n{text-align:right}
+.sc{overflow-x:auto}td.dok{background:var(--ok);font-weight:700}td.dko{background:var(--ko);font-weight:700}tr.tot td{font-weight:700}th.n{text-align:right}
 </style>
 </head>
 <body>
@@ -41,7 +41,7 @@ table{border-collapse:collapse;width:100%;font-size:13px;margin:6px 0}th,td{bord
   <div id="lerr"></div>
 </div>
 <div id="app" class="nasc">
-  <div id="nav"><button data-t="ins" class="on" onclick="vai('ins')">Inserisci</button><button data-t="mese" onclick="vai('mese')">Mese</button><button data-t="anni" onclick="vai('anni')">Anni</button><button data-t="cu" onclick="vai('cu')">CU</button><button data-t="730" onclick="vai('730')">730</button><button data-t="set" onclick="vai('set')">Impostazioni</button></div>
+  <div id="nav"><button data-t="ins" class="on" onclick="vai('ins')">Inserisci</button><button data-t="mese" onclick="vai('mese')">Mese</button><button data-t="cu" onclick="vai('cu')">CU</button><button data-t="730" onclick="vai('730')">730</button><button data-t="set" onclick="vai('set')">Impostazioni</button></div>
   <div id="t_ins">
   <div id="info"></div>
   <div id="blocchi"></div>
@@ -52,7 +52,7 @@ table{border-collapse:collapse;width:100%;font-size:13px;margin:6px 0}th,td{bord
     <div id="rimp"></div>
   </details>
   </div>
-  <div id="t_mese" class="nasc"></div><div id="t_anni" class="nasc"></div><div id="t_cu" class="nasc"></div><div id="t_730" class="nasc"></div><div id="t_set" class="nasc"></div>
+  <div id="t_mese" class="nasc"></div><div id="t_cu" class="nasc"></div><div id="t_730" class="nasc"></div><div id="t_set" class="nasc"></div>
 </div>
 </main>
 <div id="barra" class="nasc">
@@ -369,12 +369,12 @@ async function apriPannello(id) {
   box.innerHTML = ''; return box;
 }
 function vai(t) {
-  ['ins', 'mese', 'anni', 'cu', '730', 'set'].forEach(x => {
+  ['ins', 'mese', 'cu', '730', 'set'].forEach(x => {
     $('t_' + x).classList.toggle('nasc', x !== t);
     const b = document.querySelector('#nav [data-t="' + x + '"]'); if (b) b.classList.toggle('on', x === t);
   });
   $('barra').classList.toggle('nasc', t !== 'ins');
-  if (t === 'mese') renderMese(); if (t === 'anni') renderAnni(); if (t === 'cu') renderCu(); if (t === '730') render730(); if (t === 'set') renderSet();
+  if (t === 'mese') renderMese(); if (t === 'cu') renderCu(); if (t === '730') render730(); if (t === 'set') renderSet();
 }
 
 // ---- Mese: elenco, modifica, elimina, scarica ----
@@ -428,19 +428,6 @@ function scaricaStorico() {
   document.body.appendChild(a); a.click(); a.remove();
 }
 
-// ---- Anni: totali per anno, per datore o tutti ----
-async function renderAnni(d) {
-  const box = await apriPannello('t_anni'); if (!box) return;
-  d = d || '';
-  const datori = [...new Set(ST.map(r => r.datore))];
-  const rs = ST.filter(r => !d || r.datore === d), anni = [...new Set(rs.map(r => r.anno))].sort();
-  const s = h('select', { onchange: () => renderAnni(s.value) }, [new Option('Tutti i datori', '', false, !d)].concat(datori.map(x => new Option(x, x, false, x === d))));
-  const righe = [['Cedolini'].concat(anni.map(a => rs.filter(r => r.anno === a).length))]
-    .concat(VOCI().map(c => [c.etichetta].concat(anni.map(a => eur(sommaVoce(rs.filter(r => r.anno === a), c.sigla))))));
-  box.append(h('div', { className: 'riga' }, h('label', {}, 'Datore'), s), tab(['Voce'].concat(anni), righe, 1),
-    h('p', {}, 'Somma dei cedolini archiviati, 13ª e 14ª comprese. Le ferie sono escluse.'));
-}
-
 // ---- CU: riepilogo per datore ----
 const CU_VOCI = [['Retribuzione lorda', 'retr'], ['Contributi previdenziali (Ctr Inps)', 'ctr_inps'], ['Fondo pensione: contributo lavoratore', 'fonte'],
   ['Fondo pensione: contributo azienda', 'fonte_az'], ['Fondo sanitario ed Ebit (F.Est + Ebit)', ['f_est', 'ebit']], ['Imponibile fiscale (Imp. Irpef)', 'imp_irpef'],
@@ -467,7 +454,7 @@ const REGOLE_BASE = {
   ulter: { importo: 1000, da: 20000, piena: 32000, fine: 40000 },
   prev: 5164.57,
   addReg: { prog: true, sc: [] },
-  addCom: { aliq: 0, esenz: 0 }
+  addCom: { aliq: 0, esenz: 0, accPerc: 30 }
 };
 const REGOLE_ANNO = { 2024: { ulter: { importo: 0 } }, 2025: {}, 2026: { irpef: [[28000, 23], [50000, 33], [null, 43]] } };
 let REG_DB = {};
@@ -507,15 +494,17 @@ function addReg(R, a) {
   return R * b[1] / 100;
 }
 // Nel 730 gli importi sono in euro interi: ogni passaggio è arrotondato all'euro (da 0,50 in su).
-function calcola730(anno, rs, giorni, altre, oneri, r) {
+function calcola730(anno, rs, giorni, r) {
   const S = k => rs.reduce((a, x) => a + (Number(x.valori && x.valori[k]) || 0), 0), R0 = Math.round;
-  const imponibile = R0(S('imp_irpef')), od = R0(oneri), reddito = Math.max(0, imponibile - od);
-  const lorda = R0(perScaglioni(reddito, r.irpef)), dl = R0(detrLavoro(reddito, giorni, r.detr)), ul = R0(ulterioreDetr(reddito, giorni, r.ulter)), al = R0(altre);
-  const netta = Math.max(0, lorda - dl - ul - al), ritenute = R0(S('irpef_netto'));
+  const reddito = Math.max(0, R0(S('imp_irpef')));
+  const lorda = R0(perScaglioni(reddito, r.irpef)), dl = R0(detrLavoro(reddito, giorni, r.detr)), ul = R0(ulterioreDetr(reddito, giorni, r.ulter));
+  const detr = dl + ul, netta = Math.max(0, lorda - detr);
   const prev = { lav: R0(S('fonte')), az: R0(S('fonte_az')), limite: r.prev }; prev.tot = prev.lav + prev.az;
-  const aReg = R0(addReg(reddito, r.addReg));
+  const aReg = R0(addReg(reddito, r.addReg)), regPag = R0(S('add_reg_ac'));
   const aCom = (r.addCom.aliq && !(r.addCom.esenz && reddito <= r.addCom.esenz)) ? R0(reddito * r.addCom.aliq / 100) : 0;
-  return { imponibile, oneri: od, reddito, lorda, dl, ul, altre: al, netta, ritenute, saldo: netta - ritenute, prev, aReg, aCom, trReg: R0(S('add_reg')), trCom: R0(S('add_com')) };
+  const accPag = R0(S('acc_com') + S('add_com_ac'));
+  return { reddito, lorda, detr, netta, prev, aReg, regPag, regDaPagare: aReg - regPag, aCom, accPag, saldoCom: aCom - accPag,
+    accNuovo: R0(aCom * (r.addCom.accPerc || 0) / 100), ced: { lorda: R0(S('irpef_lordo')), detr: R0(S('detr')), netta: R0(S('irpef_netto')) } };
 }
 function leggiBlocco(t) {
   const a = t.indexOf('{'), b = t.lastIndexOf('}');
@@ -543,39 +532,38 @@ function filtra(o, base, perc, errori, extra) {
 }
 // ==FINE_730==
 const eu0 = n => String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
-let P730 = { giorni: 365, altre: 0, oneri: 0 };
+let P730 = { giorni: 365 };
 let PRE = null;
 async function render730(anno) {
   const box = await apriPannello('t_730'); if (!box) return;
   const anni = anniOk(); anno = anno || P730.anno || anni[0]; P730.anno = anno;
-  const campo = (et, k) => {
-    const i = h('input', { value: String(P730[k]).replace('.', ','), inputMode: 'decimal' });
-    i.onchange = () => { const n = num(i.value); P730[k] = isNaN(n) ? 0 : n; render730(); };
-    return h('div', { className: 'riga' }, h('label', {}, et), i);
-  };
-  const g = regole(anno), r = g.r, rs = ST.filter(x => x.anno === anno), ordinari = rs.filter(x => x.mese <= 12).length;
-  const x = calcola730(anno, rs, P730.giorni, P730.altre, P730.oneri, r);
+  const gi = h('input', { value: String(P730.giorni), inputMode: 'decimal' });
+  gi.onchange = () => { const n = num(gi.value); P730.giorni = (isNaN(n) || n <= 0) ? 365 : Math.min(n, 365); render730(); };
+  const g = regole(anno), r = g.r, rs = ST.filter(z => z.anno === anno), ordinari = rs.filter(z => z.mese <= 12).length;
+  const x = calcola730(anno, rs, P730.giorni, r);
   box.append(selAnno(anni, anno, render730));
   if (!g.trovato) box.append(h('div', { className: 'msg ko' }, 'Le regole fiscali ' + anno + ' non sono state inserite: uso quelle del ' + g.usa + '. Controllale in Impostazioni.'));
-  box.append(campo('Giorni di lavoro nell\'anno (max 365)', 'giorni'), campo('Altre detrazioni in euro', 'altre'), campo('Oneri deducibili non già in busta paga', 'oneri'));
-  const righe = [['Imponibile dai cedolini (tutti i datori)', eu0(x.imponibile)], ['Oneri deducibili aggiuntivi', '- ' + eu0(x.oneri)], ['Reddito complessivo', eu0(x.reddito)],
-    ['Imposta lorda', eu0(x.lorda)], ['Detrazione lavoro dipendente', '- ' + eu0(x.dl)], ['Ulteriore detrazione', '- ' + eu0(x.ul)], ['Altre detrazioni', '- ' + eu0(x.altre)],
-    ['Imposta netta', eu0(x.netta)], ['Ritenute già trattenute', '- ' + eu0(x.ritenute)], [x.saldo > 0 ? 'Saldo Irpef: a DEBITO' : 'Saldo Irpef: a CREDITO', eu0(Math.abs(x.saldo))]];
-  righe[righe.length - 1].tot = true;
-  box.append(h('h2', {}, 'Irpef'), tab(['Passaggio', 'Euro'], righe, 1),
-    h('div', { className: 'msg ' + (x.saldo > 0 ? 'ko' : 'ok') }, 'Stima Irpef: ' + (x.saldo > 0 ? 'da versare ' : 'da ricevere ') + eu0(Math.abs(x.saldo)) + ' euro.'));
-  if (ordinari === 12 && Math.abs(x.saldo) > 10) box.append(h('div', { className: 'msg ko' }, 'Attenzione: la stima differisce di ' + eu0(Math.abs(x.saldo)) + ' euro dalle ritenute dei cedolini. Con un solo datore e un anno completo di solito significa che manca una regola o una detrazione: guarda in Impostazioni, oppure scrivimi.'));
-  const pr = x.prev, entro = pr.tot <= pr.limite;
+  box.append(h('div', { className: 'riga' }, h('label', {}, 'Giorni di lavoro nell\'anno (max 365)'), gi));
+  const conf = (et, ced, calc) => { const d = ced - calc; return h('tr', {}, h('td', {}, et), h('td', { className: 'n' }, eu0(ced)), h('td', { className: 'n' }, eu0(calc)), h('td', { className: 'n ' + (Math.abs(d) <= 2 ? 'dok' : 'dko') }, (d > 0 ? '+' : '') + eu0(d))); };
+  const t = h('table', {}, h('tr', {}, ['Voce', 'Dai cedolini', 'Dal calcolo', 'Differenza'].map((z, i) => h('th', { className: i ? 'n' : '' }, z))),
+    conf('Imposta lorda', x.ced.lorda, x.lorda), conf('Detrazioni', x.ced.detr, x.detr), conf('Irpef (imposta netta)', x.ced.netta, x.netta));
+  const dN = x.ced.netta - x.netta, ok = Math.abs(dN) <= 2;
+  box.append(h('h2', {}, 'Irpef: cedolini e calcolo'), h('p', {}, 'Imponibile dai cedolini: ' + eu0(x.reddito) + ' euro.'), h('div', { className: 'sc' }, t),
+    h('div', { className: 'msg ' + (ok ? 'ok' : 'ko') }, ok ? 'L\'Irpef pagata nei cedolini coincide con il calcolo (differenza ' + eu0(dN) + ' euro).'
+      : (dN > 0 ? 'Nei cedolini hai pagato ' + eu0(dN) + ' euro in PIÙ del calcolo: sarebbe a credito.' : 'Nei cedolini hai pagato ' + eu0(-dN) + ' euro in MENO del calcolo: sarebbe a debito.') + '\nGuarda la riga delle detrazioni per capire da dove nasce.'));
+  const pr = x.prev;
   box.append(h('h2', {}, 'Previdenza complementare'),
     tab(['Voce', 'Euro'], [['Contributo lavoratore (Fonte)', eu0(pr.lav)], ['Contributo azienda (Fonte c/az)', eu0(pr.az)], ['Totale fondi pensione', eu0(pr.tot)], ['Limite di deducibilità', eu(pr.limite)]], 1),
-    h('p', {}, (entro ? 'Il totale è entro il limite. ' : 'Il totale supera il limite di deducibilità. ') + 'Il contributo versato tramite busta paga è già escluso dall\'imponibile dei cedolini, quindi non va dedotto di nuovo; solo i versamenti fatti fuori busta vanno negli oneri deducibili.'));
-  const lg = r.luogo || {}, reg = r.addReg.sc && r.addReg.sc.length, com = r.addCom.aliq > 0;
+    h('p', {}, (pr.tot <= pr.limite ? 'Il totale è entro il limite. ' : 'Il totale supera il limite di deducibilità. ') + 'Quanto versato in busta paga è già escluso dall\'imponibile dei cedolini.'));
+  const rata = (tot, n) => tot > 0 ? ' (circa ' + eu0(tot / n) + ' al mese)' : '', lg = r.luogo || {}, reg = r.addReg.sc && r.addReg.sc.length, com = r.addCom.aliq > 0;
   box.append(h('h2', {}, 'Addizionali' + (lg.regione || lg.comune ? ' (' + [lg.regione, lg.comune].filter(Boolean).join(' - ') + ')' : '')),
-    tab(['Voce', 'Euro'], [['Addizionale regionale dovuta', reg ? eu0(x.aReg) : 'aliquote non impostate'], ['Addizionale regionale trattenuta nei cedolini', eu0(x.trReg)],
-      ['Addizionale comunale dovuta', com ? eu0(x.aCom) : 'aliquota non impostata'], ['Addizionale comunale trattenuta nei cedolini', eu0(x.trCom)]], 1),
-    h('p', {}, 'Le addizionali si calcolano sul reddito complessivo con le aliquote della regione e del comune di residenza fiscale. L\'importo trattenuto nei cedolini comprende anche le rate dell\'anno precedente: il confronto è solo indicativo.'));
-  box.append(h('p', {}, 'Mensilità ordinarie presenti: ' + ordinari + ' su 12' + (ordinari < 12 ? ' (anno incompleto: la stima non è attendibile)' : '') + '. Importi arrotondati all\'euro come nel 730.'),
-    h('p', {}, 'Non incluse: familiari a carico, oneri detraibili, TFR, somma non imponibile fino a 20.000 euro; inserisci a mano ciò che manca nei campi sopra. È una stima di controllo, non sostituisce il 730 né un professionista.'));
+    tab(['Regionale', 'Euro'], [['Dovuta sul reddito ' + anno, reg ? eu0(x.aReg) : 'aliquote non impostate'], ['Già trattenuta per il ' + anno + ' (cedolino di chiusura)', eu0(x.regPag)],
+      ['Da pagare nei cedolini del ' + (anno + 1) + ' (11 rate, gennaio-novembre)', reg ? eu0(x.regDaPagare) + rata(x.regDaPagare, 11) : '-']], 1),
+    tab(['Comunale', 'Euro'], [['Dovuta sul reddito ' + anno, com ? eu0(x.aCom) : 'aliquota non impostata'], ['Acconto già pagato per il ' + anno, eu0(x.accPag)],
+      ['Saldo da pagare nei cedolini del ' + (anno + 1) + ' (11 rate)', com ? eu0(x.saldoCom) + rata(x.saldoCom, 11) : '-'],
+      ['Acconto da pagare per il ' + (anno + 1) + ' (' + (r.addCom.accPerc || 0) + '%, 9 rate marzo-novembre)', com ? eu0(x.accNuovo) + rata(x.accNuovo, 9) : '-']], 1),
+    h('p', {}, 'Nel cedolino di chiusura (dimissioni) l\'addizionale include anche quella dell\'anno in corso: indicane la parte nei campi "anno in corso" (Inserisci o Mese), così il calcolo non la conta due volte. Il file GnuCash non cambia.'));
+  box.append(h('p', {}, 'Mensilità ordinarie presenti: ' + ordinari + ' su 12' + (ordinari < 12 ? ' (anno incompleto: il confronto non è attendibile)' : '') + '. Importi arrotondati all\'euro come nel 730. Non incluse: familiari a carico, oneri, TFR. È una stima di controllo, non sostituisce il 730 né un professionista.'));
 }
 
 // ---- Impostazioni: regole fiscali per anno e parametri ----
@@ -594,6 +582,22 @@ async function renderSet(anno, messaggio) {
   const nt = (et, v, k) => { const e = nf(et, v, k); F[k].style = 'text-align:left'; return e; };
   const n = k => { const x = num(F[k].value); return isNaN(x) ? 0 : x; };
   const nn = k => F[k].value.trim() === '' ? null : n(k);
+  const stato = h('span', {});
+  const bCerca = h('button', { className: 'p', onclick: async () => {
+    const reg = F.reg.value.trim(), com = F.com.value.trim();
+    if (!reg || !com) { mostra('Scrivi la regione e il comune di residenza fiscale.', 'ko'); return; }
+    bCerca.disabled = true; stato.textContent = ' Cerco... può richiedere uno o due minuti.';
+    try {
+      const { data, error } = await sb.functions.invoke('cerca-regole', { body: { anno, regione: reg, comune: com, attuali: r } });
+      if (error) throw new Error(error.message || 'errore della funzione');
+      if (data.errore) throw new Error(data.errore);
+      const { anno: a2, note, ...resto } = data.blocco, er = [], ex = {}, pulito = filtra(resto, REGOLE_BASE, '', er, ex);
+      if (er.length) throw new Error('blocco non valido: ' + er.join('; '));
+      pulito.luogo = { regione: reg, comune: com };
+      PRE = { regole: pulito, extra: ex, note: (note || '') + (data.fonti && data.fonti.length ? '\nFonti: ' + data.fonti.join(' ') : '') };
+      renderSet(anno);
+    } catch (e) { bCerca.disabled = false; stato.textContent = ''; mostra('Ricerca non riuscita: ' + e.message, 'ko'); }
+  } }, 'Cerca le regole');
   box.innerHTML = '';
   const s = h('select', { onchange: () => renderSet(Number(s.value)) }, anni.map(a => new Option(a, a, false, a === anno)));
   box.append(h('h2', {}, 'Regole fiscali per anno'), h('div', { className: 'riga' }, h('label', {}, 'Anno'), s));
@@ -616,7 +620,7 @@ async function renderSet(anno, messaggio) {
       try { await navigator.clipboard.writeText(JSON.stringify(Object.assign({ anno }, r))); mostra('Regole del ' + anno + ' copiate: puoi incollarle in chat.', 'ok'); }
       catch (e) { mostra('Non riesco a copiare: ' + e.message, 'ko'); }
     } }, 'Copia le regole di questo anno'))));
-  box.append(nt('Regione di residenza', r.luogo.regione, 'reg'), nt('Comune di residenza', r.luogo.comune, 'com'), h('h2', {}, 'Scaglioni Irpef'),
+  box.append(nt('Regione di residenza', r.luogo.regione, 'reg'), nt('Comune di residenza', r.luogo.comune, 'com'), h('p', {}, bCerca, stato), h('h2', {}, 'Scaglioni Irpef'),
     nf('1° scaglione: fino a (euro)', r.irpef[0][0], 'i1'), nf('1° aliquota %', r.irpef[0][1], 'p1'), nf('2° scaglione: fino a (euro)', r.irpef[1][0], 'i2'), nf('2° aliquota %', r.irpef[1][1], 'p2'),
     nf('Oltre: aliquota %', r.irpef[2][1], 'p3'), h('h2', {}, 'Detrazione lavoro dipendente'),
     nf('Importo fisso fino alla 1ª soglia', r.detr.d1, 'd1'), nf('1ª soglia (euro)', r.detr.s1, 's1'), nf('Importo base 2ª fascia', r.detr.d2, 'd2'), nf('Importo variabile 2ª fascia', r.detr.d2x, 'd2x'),
@@ -627,7 +631,7 @@ async function renderSet(anno, messaggio) {
   const cb = h('input', { type: 'checkbox', checked: !!r.addReg.prog }); F.prog = cb;
   box.append(h('div', { className: 'riga' }, h('label', {}, 'Aliquote a scaglioni progressivi'), cb), h('p', {}, 'Scrivi gli scaglioni in ordine. Nell\'ultima riga lascia vuoto "fino a" (vale per il reddito oltre).'));
   for (let i = 1; i <= 5; i++) { const sc = (r.addReg.sc || [])[i - 1] || [null, null]; box.append(nf('Riga ' + i + ': fino a (euro)', sc[0], 'r' + i + 'f'), nf('Riga ' + i + ': aliquota %', sc[1], 'r' + i + 'p')); }
-  box.append(h('h2', {}, 'Addizionale comunale'), nf('Aliquota %', r.addCom.aliq, 'c1'), nf('Esente fino a (euro, 0 se non c\'è)', r.addCom.esenz, 'c2'));
+  box.append(h('h2', {}, 'Addizionale comunale'), nf('Aliquota %', r.addCom.aliq, 'c1'), nf('Esente fino a (euro, 0 se non c\'è)', r.addCom.esenz, 'c2'), nf('Acconto per l\'anno dopo (%)', r.addCom.accPerc, 'c3'));
   box.append(h('p', {}, h('button', { className: 'p', onclick: async () => {
     const nuove = {
       luogo: { regione: F.reg.value.trim(), comune: F.com.value.trim() },
@@ -635,7 +639,7 @@ async function renderSet(anno, messaggio) {
       detr: { d1: n('d1'), s1: n('s1'), d2: n('d2'), s2: n('s2'), d2x: n('d2x'), s3: n('s3'), p65: n('p65'), p65da: n('p65da'), p65a: n('p65a') },
       ulter: { importo: n('u1'), da: n('u2'), piena: n('u3'), fine: n('u4') }, prev: n('prev'),
       addReg: { prog: F.prog.checked, sc: [1, 2, 3, 4, 5].map(i => [nn('r' + i + 'f'), nn('r' + i + 'p')]).filter(z => z[1] !== null) },
-      addCom: { aliq: n('c1'), esenz: n('c2') }
+      addCom: { aliq: n('c1'), esenz: n('c2'), accPerc: n('c3') }
     };
     if (Object.keys(EXTRA).length) nuove.extra = EXTRA;
     const { error } = await sb.from('ced_parametri').upsert({ profilo_id: PROF.id, nome: 'regole_' + anno, valore: JSON.stringify(nuove), spiegazione: 'Regole fiscali ' + anno }, { onConflict: 'profilo_id,nome' });
